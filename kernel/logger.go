@@ -34,7 +34,7 @@ type logData struct {
 
 var logWriter io.Writer
 
-func Touch(writer io.Writer) {
+func TouchLogger(writer io.Writer) {
 	Env.LogPath = ""
 	logWriter = writer
 }
