@@ -9,3 +9,5 @@
 - 需要自行拷贝`node/gmpd/bin`目录下的文件到环境变量`PATH`目录下，例如：`/usr/bin`
 
 - 目前暂时没有支持windows的想法
+
+## 更多详情请查阅 [WIKI](wiki)
