@@ -10,4 +10,4 @@
 
 - 目前暂时没有支持windows的想法
 
-## 更多详情请查阅 [WIKI](wiki)
+## 更多详情请查阅 [WIKI](https://github.com/liangmanlin/gootp/wiki)
