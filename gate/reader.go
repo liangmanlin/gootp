@@ -34,10 +34,10 @@ func startReader(dest *kernel.Pid, conn *Conn, decoder func([]byte) (int, interf
 			}
 			packSize = ReadHead(head, headBuf)
 			if packSize > 0 {
-				if decoder == nil || len(pack) < packSize { // todo 这里可以通过闭包提高性能
+				if decoder == nil || cap(pack) < packSize { // todo 这里可以通过闭包提高性能
 					pack = make([]byte, packSize) // TODO 后续需要解决频繁申请内存的垃圾回收问题
 				}
-				_, err = io.ReadAtLeast(c, pack, packSize)
+				_, err = io.ReadAtLeast(c, pack[:packSize], packSize)
 				if err != nil {
 					kernel.Cast(dest, &TcpError{Err: err})
 					goto end
