@@ -213,5 +213,9 @@ func (c *Context) recMsg(msg interface{}) {
 		c.msgQ = m
 		return
 	}
-	c.msgQ.next = m
+	q := c.msgQ
+	for q.next != nil {
+		q = q.next
+	}
+	q.next = m
 }
