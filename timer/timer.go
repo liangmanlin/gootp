@@ -40,6 +40,10 @@ func (t *Timer) Add(key TimerKey, inv, times int32, f interface{}, args ...inter
 	}
 }
 
+func (t *Timer) Del(key TimerKey) {
+	delete(t.m,key)
+}
+
 // TODO 后续考虑增加多级时间分类，减少遍历长度
 func (t *Timer) Loop(state interface{}, now2 int64) {
 	t.isLooping = true
