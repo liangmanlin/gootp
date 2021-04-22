@@ -31,6 +31,7 @@ func (c *Coder) encodeStruct(buf []byte, ptr unsafe.Pointer, child reflect.Type)
 	if *(*unsafe.Pointer)(ptr) == nil {
 		return buf
 	}
+	ptr = *(*unsafe.Pointer)(ptr)
 	def := c.getDefTF(child)
 	buf = c.encodeDef(buf, ptr, child, def)
 	return buf
