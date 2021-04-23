@@ -170,16 +170,14 @@ func (c *Coder) encodeSlice(buf []byte, ptr unsafe.Pointer, child reflect.Type) 
 	tf := child.Elem()
 	inc := tf.Size()
 	slicePtr := *(*unsafe.Pointer)(ptr)
-	getPtrF := getPtr
 	if tf.Kind() == reflect.Ptr {
 		tf = tf.Elem()
-		getPtrF = getPtrPtr
 	}
 	start := len(buf)
 	enValueFunc := c.getEncodeFunc(tf)
 	offset := uintptr(0)
 	for i := 0; i < lens; i++ {
-		p := getPtrF(slicePtr, offset)
+		p := getPtr(slicePtr, offset)
 		offset += inc
 		buf = enValueFunc(buf, p, tf)
 	}
