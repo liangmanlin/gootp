@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -43,12 +44,9 @@ func Start(nodeName string, cookie string, defs []interface{}) {
 	def = append(def, defs...)
 	coder = pb.ParseSlice(def, -1)
 	Env.nodeName = nodeName
-	kernel.SetSelfNodeName(nodeName)
-	// 启动监控数
-	kernel.SupStartChild("kernel", &kernel.SupChild{ChildType: kernel.SupChildTypeSup, Name: "NodeSup"})
-	kernel.SupStartChild("NodeSup", &kernel.SupChild{ChildType: kernel.SupChildTypeWorker, Name: "NodeMonitor", Svr: monitorActor, ReStart: true})
-	kernel.SupStartChild("NodeSup", &kernel.SupChild{ChildType: kernel.SupChildTypeWorker, Name: "RPC", Svr: rpcSvr, ReStart: true})
-	start(nodeName)
+	if err = kernel.AppStart(&app{});err != nil {
+		log.Panic(err)
+	}
 }
 
 func start(nodeName string) {
@@ -69,7 +67,7 @@ reg:
 			log.Panicf("can not connect to gmpd port: %d", gmpdPort)
 			conn.Close()
 		} else {
-			time.Sleep(100*time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			goto reg
 		}
 	}
@@ -152,4 +150,8 @@ func ConnectNode(destNode string) bool {
 
 func GetCookie() string {
 	return Env.cookie
+}
+
+func IsProtoDef(rType reflect.Type) bool {
+	return coder.IsDef(rType)
 }

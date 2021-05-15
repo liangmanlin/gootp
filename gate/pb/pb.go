@@ -130,7 +130,7 @@ func makeDef(src interface{}, id int, c *Coder, m map[reflect.Type]*inDef) {
 		case reflect.Map:
 			minSize += 2
 			child := v.Type()
-			checkMapKey(rt, ft, child.Key())
+			checkMapKey(rt, ft, child.Key(),c,m)
 			if child.Elem().String() == "&kernel.Pid"{
 				vv := make(chan int)
 				child = reflect.MapOf(child.Key(),reflect.TypeOf(&vv))
@@ -172,7 +172,7 @@ func checkStruct(st reflect.Type, ft reflect.StructField, rt reflect.Type, c *Co
 		checkPanic(st, ft, child, "slice")
 		checkStruct(st, ft, child, c, m)
 	case reflect.Map:
-		checkMapKey(st, ft, rt.Key())
+		checkMapKey(st, ft, rt.Key(),c,m)
 		child := rt.Elem()
 		checkPanic(st, ft, child, "map")
 		checkStruct(st, ft, child, c, m)
@@ -194,7 +194,7 @@ func checkPanic(st reflect.Type, ft reflect.StructField, child reflect.Type, fla
 	}
 }
 
-func checkMapKey(st reflect.Type, ft reflect.StructField, key reflect.Type) {
+func checkMapKey(st reflect.Type, ft reflect.StructField, key reflect.Type,c *Coder,m map[reflect.Type]*inDef) {
 	switch key.Kind() {
 	case reflect.Int8:
 	case reflect.Int16:
@@ -202,6 +202,8 @@ func checkMapKey(st reflect.Type, ft reflect.StructField, key reflect.Type) {
 	case reflect.Int64:
 	case reflect.Uint16:
 	case reflect.String:
+	case reflect.Struct:
+		checkStruct(st , ft , key , c, m)
 	default:
 		log.Panic(fmt.Errorf("struct [%s.%s] map key [%s] is not allow", st.String(), ft.Name, key.String()))
 	}
@@ -223,4 +225,12 @@ func (c *Coder) init() {
 	c.enMap[reflect.Map] = c.encodeMap
 	c.enMap[reflect.Struct] = c.encodeStruct
 	c.enMap[reflect.Chan] = c.encodePid
+}
+
+func (c *Coder)IsDef(rType reflect.Type) bool {
+	if rType.Kind() == reflect.Ptr {
+		rType = rType.Elem()
+	}
+	_,ok := c.def[rType]
+	return ok
 }

@@ -52,7 +52,7 @@ type stop string
 
 type stopFunc func()
 
-type InitFunc func(ctx *Context,pid *Pid, args ...interface{}) unsafe.Pointer
+type InitFunc func(ctx *Context, pid *Pid, args ...interface{}) unsafe.Pointer
 type HandleCastFunc func(ctx *Context, msg interface{})
 type HandleCallFunc func(ctx *Context, request interface{}) interface{}
 type TerminateFunc func(ctx *Context, reason *Terminate)
@@ -99,3 +99,36 @@ type NodeCallName struct {
 	CallID int64
 	Ch     chan interface{}
 }
+
+type KMsg struct {
+	ModID int32
+	Msg   interface{}
+}
+
+type Application interface {
+	Name() string
+	Start(bootType AppBootType) *Pid // return the supervisor pid
+	Stop(stopType AppStopType)
+	SetEnv(Key string,value interface{})
+	GetEnv(key string) interface{}
+}
+
+type appInfo struct {
+	app Application
+	pid *Pid
+}
+
+type AppBootType int
+type AppStopType int
+
+const (
+	APP_BOOT_TYPE_START = iota + 1
+	APP_BOOT_TYPE_RESTART
+)
+
+const (
+	APP_STOP_TYPE_NORMAL = iota + 1
+	APP_STOP_TYPE_RESTART
+)
+
+

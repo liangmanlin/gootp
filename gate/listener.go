@@ -54,6 +54,7 @@ func (l *listener) startAccept(ls net.Listener, handler *kernel.Actor, clientSup
 			log.Panic(err)
 		}
 		kernel.Cast(pid, true)
+		pid.SetDie()
 	}
 }
 

@@ -20,7 +20,7 @@ var mangerActor = &kernel.Actor{
 		state.idle = []*kernel.Pid{workerPid}
 		state.poolSize = 1
 		state.maxPoolSize = 5
-		kernel.TimerStart(kernel.TimerTypeForever, pid, 5*1000, true)
+		kernel.SendAfter(kernel.TimerTypeForever, pid, 5*1000, true)
 		return unsafe.Pointer(&state)
 	},
 	HandleCast: func(ctx *kernel.Context, msg interface{}) {

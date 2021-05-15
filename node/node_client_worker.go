@@ -60,15 +60,15 @@ func rec(conn *gate.Conn,father *kernel.Pid,recv *bool) {
 
 func router(pack []byte, father *kernel.Pid) {
 	switch pack[0] {
-	case 0: // ping
+	case M_TYPE_PING: // ping
 		kernel.Cast(father, ping(1))
-	case 1: //目标消息
+	case M_TYPE_CAST: //目标消息
 		index, pid := kernel.DecodePid(pack, 1)
 		if pid != nil {
 			_, msg := coder.Decode(pack[index:])
 			kernel.Cast(pid, msg)
 		}
-	case 2: // call
+	case M_TYPE_CALL: // call
 		_, callID := pb.DecodeInt64(pack, 1)
 		index, pid := kernel.DecodePid(pack, 9)
 		if pid != nil {
@@ -79,7 +79,7 @@ func router(pack []byte, father *kernel.Pid) {
 		}else{
 			replyNil(callID,father)
 		}
-	case 3: // call result
+	case M_TYPE_CALL_RESULT: // call result
 		index, callID := pb.DecodeInt64(pack, 1)
 		var reply interface{}
 		if len(pack) > 9 {
@@ -89,13 +89,13 @@ func router(pack []byte, father *kernel.Pid) {
 		}
 		r := &call{callID: callID, reply: reply}
 		kernel.Cast(father, r)
-	case 4:
+	case M_TYPE_CAST_NAME: // cast name
 		index, name := pb.DecodeString(pack, 1)
 		if pid := kernel.WhereIs(name); pid != nil {
 			_, msg := coder.Decode(pack[index:])
 			kernel.Cast(pid, msg)
 		}
-	case 5: // call name
+	case M_TYPE_CALL_NAME: // call name
 		_, callID := pb.DecodeInt64(pack, 1)
 		index, name := pb.DecodeString(pack, 9)
 		if pid := kernel.WhereIs(name); pid != nil {
@@ -105,6 +105,21 @@ func router(pack []byte, father *kernel.Pid) {
 			kernel.Cast(pid, ci)
 		}else{
 			replyNil(callID,father)
+		}
+	case M_TYPE_CAST_KMSG:
+		index, pid := kernel.DecodePid(pack, 1)
+		if pid != nil {
+			var modID int32
+			index,modID = pb.DecodeInt32(pack,index)
+			_, msg := coder.Decode(pack[index:])
+			kernel.Cast(pid, &kernel.KMsg{ModID: modID,Msg: msg})
+		}
+	case M_TYPE_CAST_NAME_KMSG:
+		index, name := pb.DecodeString(pack, 5)
+		if pid := kernel.WhereIs(name); pid != nil {
+			_,modID := pb.DecodeInt32(pack,1)
+			_, msg := coder.Decode(pack[index:])
+			kernel.Cast(pid, &kernel.KMsg{ModID: modID,Msg: msg})
 		}
 	}
 }

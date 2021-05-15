@@ -61,6 +61,13 @@ func Trunc(v float32) int32 {
 	return int32(v)
 }
 
+func Abs(v int32) int32 {
+	if v >=0 {
+		return v
+	}
+	return -v
+}
+
 func SliceDelInt32(arr []int32, value int32) []int32 {
 	for i, v := range arr {
 		if value == v {
@@ -77,6 +84,15 @@ func SliceDelInt64(arr []int64, value int64) []int64 {
 		}
 	}
 	return arr
+}
+
+func SliceInt32Member(value int32,arr []int32)bool{
+	for _,v := range arr{
+		if v == value{
+			return true
+		}
+	}
+	return false
 }
 
 // 根据一个范围，获取到值

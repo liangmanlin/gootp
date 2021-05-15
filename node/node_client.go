@@ -9,17 +9,18 @@ import (
 	"unsafe"
 )
 
-var pingBuf = []byte{0,0,0,1,0}
+var pingBuf = []byte{0, 0, 0, 1, 0}
 
 type client struct {
 	conn           *gate.Conn
 	node           *kernel.Node
 	callID2Channel map[int64]chan interface{}
 	pingFail       int
+	buf            []byte
 }
 
 var nodeClient = &kernel.Actor{
-	Init: func(context *kernel.Context,pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *kernel.Context, pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
 		c := client{}
 		c.conn = args[0].(*gate.Conn)
 		c.callID2Channel = make(map[int64]chan interface{})
@@ -27,45 +28,52 @@ var nodeClient = &kernel.Actor{
 	},
 	HandleCast: func(context *kernel.Context, msg interface{}) {
 		state := (*client)(context.State)
+		buf := state.buf[0:0]
 		switch m := msg.(type) {
 		case *kernel.NodeMsg:
 			if state.conn != nil {
-				buf := m.Dest.ToBytes([]byte{0, 0, 0, 0, 1})
-				b := coder.Encode(m.Msg, 0)
-				buf = append(buf, b...)
+				switch tm := m.Msg.(type) {
+				case *kernel.KMsg:
+					// 特殊结构
+					buf = makeBuf(buf, 9, M_TYPE_CAST_KMSG)
+					buf = m.Dest.ToBytes(buf)
+					pb.WriteIn32(buf, tm.ModID, 5)
+					buf = coder.EncodeBuff(tm.Msg, 0, buf)
+				default:
+					buf = makeBuf(buf, 5, M_TYPE_CAST)
+					buf = m.Dest.ToBytes(buf)
+					buf = coder.EncodeBuff(m.Msg, 0, buf)
+				}
 				gate.WriteSize(buf, 4, len(buf)-4)
 				state.conn.SendBufHead(buf)
 			}
 		case *kernel.NodeCall:
 			if state.conn != nil {
 				state.callID2Channel[m.CallID] = m.Ch
-				buf := m.Dest.ToBytes([]byte{0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0}) // head+type+callID
+				buf = makeBuf(buf, 13, M_TYPE_CAST_KMSG)
+				buf = m.Dest.ToBytes(buf) // head+type+callID
 				pb.WriteInt64(buf, m.CallID, 5)
-				b := coder.Encode(m.Req, 0)
-				buf = append(buf, b...)
+				buf = coder.EncodeBuff(m.Req, 0, buf)
 				gate.WriteSize(buf, 4, len(buf)-4)
 				state.conn.SendBufHead(buf)
 			}
 		case *kernel.NodeCallName:
 			if state.conn != nil {
 				state.callID2Channel[m.CallID] = m.Ch
-				size := 15
-				buf := make([]byte, size)
-				buf[4] = 5
+				const size = 15
+				buf = makeBuf(buf, size, M_TYPE_CALL_NAME)
 				pb.WriteInt64(buf, m.CallID, 5)
 				buf = pb.WriteString(buf, m.Dest, 13)
-				b := coder.Encode(m.Req, 0)
-				buf = append(buf, b...)
+				buf = coder.EncodeBuff(m.Req, 0, buf)
 				gate.WriteSize(buf, 4, len(buf)-4)
 				state.conn.SendBufHead(buf)
 			}
 		case *kernel.CallResult:
 			if state.conn != nil {
-				buf := []byte{0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0} // head+type+callID
+				buf = makeBuf(buf, 13, M_TYPE_CALL_RESULT)
 				pb.WriteInt64(buf, m.ID, 5)
 				if m.Result != nil {
-					b := coder.Encode(m.Result, 0)
-					buf = append(buf, b...)
+					buf = coder.EncodeBuff(m.Result, 0, buf)
 				}
 				gate.WriteSize(buf, 4, len(buf)-4)
 				state.conn.SendBufHead(buf)
@@ -78,12 +86,19 @@ var nodeClient = &kernel.Actor{
 			}
 		case *kernel.NodeMsgName:
 			if state.conn != nil {
-				size := 7
-				buf := make([]byte, size)
-				buf[4] = 4
-				buf = pb.WriteString(buf, m.Dest, 5)
-				b := coder.Encode(m.Msg, 0)
-				buf = append(buf, b...)
+				switch tm := m.Msg.(type) {
+				case *kernel.KMsg:
+					const size = 11
+					buf = makeBuf(buf, size, M_TYPE_CAST_NAME_KMSG)
+					pb.WriteIn32(buf,tm.ModID,5)
+					buf = pb.WriteString(buf, m.Dest, 9)
+					buf = coder.EncodeBuff(tm.Msg, 0, buf)
+				default:
+					const size = 7
+					buf = makeBuf(buf, size, M_TYPE_CAST_NAME)
+					buf = pb.WriteString(buf, m.Dest, 5)
+					buf = coder.EncodeBuff(m.Msg, 0, buf)
+				}
 				gate.WriteSize(buf, 4, len(buf)-4)
 				state.conn.SendBufHead(buf)
 			}
@@ -97,7 +112,7 @@ var nodeClient = &kernel.Actor{
 			// ping
 			state.pingFail = 0
 		case int:
-			if state.pingFail >=2 {
+			if state.pingFail >= 2 {
 				// 断开连接
 				kernel.ErrorLog("Node ping fail")
 				context.Exit("normal")
@@ -109,6 +124,7 @@ var nodeClient = &kernel.Actor{
 		default:
 			kernel.ErrorLog("un handle msg :%#v", m)
 		}
+		state.buf = buf
 	},
 	HandleCall: func(context *kernel.Context, request interface{}) interface{} {
 		state := (*client)(context.State)
@@ -126,7 +142,7 @@ var nodeClient = &kernel.Actor{
 		// 报告节点退出
 		if state.node != nil {
 			kernel.NodeDisconnect(state.node)
-			kernel.Cast(monitorPid,&NodeOP{Name: state.node.Name(),OP: OPDisConnect})
+			kernel.Cast(monitorPid, &NodeOP{Name: state.node.Name(), OP: OPDisConnect})
 			kernel.ErrorLog("Node [%s] disconnect", state.node.Name())
 		}
 	},
@@ -154,13 +170,13 @@ func startWorker(state *client, context *kernel.Context) {
 		// 分配本地id
 		state.node = kernel.GetNode(m.Name)
 		kernel.SetNodeNetWork(state.node, context.Self())
-		kernel.Cast(monitorPid,&NodeOP{Name: m.Name,OP: OPConnect})
+		kernel.Cast(monitorPid, &NodeOP{Name: m.Name, OP: OPConnect})
 
 		kernel.ErrorLog("Node [%s] connected", m.Name)
 
 		buf = coder.Encode(&ConnectSucc{Name: Env.nodeName, Self: context.Self()}, 4)
 		state.conn.SendBufHead(buf)
-		kernel.TimerStart(kernel.TimerTypeForever, context.Self(), Env.PingTick, 1)
+		kernel.SendAfter(kernel.TimerTypeForever, context.Self(), Env.PingTick, 1)
 		// 启动接收进程
 		go recPacket(state.conn, context.Self())
 	}
@@ -170,7 +186,7 @@ func startWorkerConnect(state *client, context *kernel.Context) bool {
 	state.conn.SetHead(4)
 	time := kernel.Now()
 	sign := crypto.Md5(([]byte)(fmt.Sprintf("%s.%d", Env.cookie, time)))
-	info := &Connect{Time: time, Sign: sign, Name: Env.nodeName,DestName: context.Name()}
+	info := &Connect{Time: time, Sign: sign, Name: Env.nodeName, DestName: context.Name()}
 	buf := coder.Encode(info, 4)
 	state.conn.SendBufHead(buf)
 	err, buf := state.conn.Recv(0, 0)
@@ -184,8 +200,8 @@ func startWorkerConnect(state *client, context *kernel.Context) bool {
 		// 分配本地id
 		state.node = kernel.GetNode(m.Name)
 		kernel.SetNodeNetWork(state.node, context.Self())
-		kernel.Cast(monitorPid,&NodeOP{Name: m.Name,OP: OPConnect})
-		kernel.TimerStart(kernel.TimerTypeForever, context.Self(),Env.PingTick, 1)
+		kernel.Cast(monitorPid, &NodeOP{Name: m.Name, OP: OPConnect})
+		kernel.SendAfter(kernel.TimerTypeForever, context.Self(), Env.PingTick, 1)
 		// 启动接收进程
 		go recPacket(state.conn, context.Self())
 		return true
@@ -203,4 +219,21 @@ func checkCookie(m *Connect) bool {
 		return false
 	}
 	return m.Sign == crypto.Md5(([]byte)(fmt.Sprintf("%s.%d", Env.cookie, m.Time)))
+}
+
+func makeBuf(buf []byte, size int, v byte) []byte {
+	if cap(buf) < size {
+		buf = make([]byte, size, 2*size)
+		buf[4] = v
+	} else {
+		buf = buf[0:size]
+		for i := 0; i < size; i++ {
+			if i == 4 {
+				buf[i] = v
+			} else {
+				buf[i] = 0
+			}
+		}
+	}
+	return buf
 }

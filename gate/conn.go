@@ -5,6 +5,7 @@ import (
 	"github.com/liangmanlin/gootp/kernel"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +14,7 @@ type Conn struct {
 	head    int
 	reading bool
 	ctl     chan interface{}
+	ctlSize int32
 	headBuf []byte
 }
 
@@ -87,6 +89,7 @@ func (c *Conn) StartReaderDecode(dest *kernel.Pid,decoder func([]byte)(int,inter
 		return
 	}
 	if c.reading {
+		atomic.AddInt32(&c.ctlSize,1)
 		c.ctl <- dest
 	} else {
 		go startReader(dest, c,decoder)

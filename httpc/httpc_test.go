@@ -15,12 +15,12 @@ func TestGet(t *testing.T) {
 	}()
 	kernel.Env.LogPath = ""
 	kernel.KernelStart(func() {
-		if body,ok := Get("http://github.com/liangmanlin/gootp",nil,1,false);ok{
+		if body,ok := Get("http://daohang.4399om.com/",nil,3,false);ok{
 			fmt.Println(string(body))
 		}else{
 			t.Errorf("error")
 		}
-		if body,ok := GetSSL("http://github.com/liangmanlin/gootp",nil,1,false);ok{
+		if body,ok := GetSSL("https://daohang.4399om.com/",nil,3,false);ok{
 			fmt.Println(string(body))
 		}else{
 			t.Errorf("error")

@@ -41,3 +41,18 @@ const (
 	OPConnect OPType = 1 << iota
 	OPDisConnect
 )
+
+const (
+	M_TYPE_PING byte = iota
+	M_TYPE_CAST
+	M_TYPE_CALL
+	M_TYPE_CALL_RESULT
+	M_TYPE_CAST_NAME
+	M_TYPE_CALL_NAME
+	M_TYPE_CAST_KMSG
+	M_TYPE_CAST_NAME_KMSG
+)
+
+type app struct {
+
+}

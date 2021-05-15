@@ -41,6 +41,3 @@ func Start(DBConfig Config,defSlice []*TabDef, gameDB string,logDB string) {
 		}
 	}
 }
-
-func init()  {
-}

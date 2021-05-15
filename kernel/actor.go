@@ -150,12 +150,13 @@ func CallTimeOut(pid *Pid, request interface{}, timeOut time.Duration) (bool, in
 func start(actor *Actor, opt []interface{}, args ...interface{}) (*Pid, interface{}) {
 	c := make(chan interface{}, Env.ActorChanCacheSize)
 	id := makeID()
-	pid := &Pid{id, c, make(chan interface{}, 1), nil, 0}
+	pid := &Pid{0,id, c, make(chan interface{}, 1), nil}
 	ok, err := startGO(pid, actor, opt, args...)
 	if ok {
 		return pid, nil
 	}
 	close(pid.c)
+	close(pid.call)
 	return nil, err
 }
 
@@ -188,10 +189,9 @@ func loop(pid *Pid, context *Context) {
 	for {
 		recMsg(pid, context, &iStop)
 		if iStop != nil {
-			goto exit
+			break
 		}
 	}
-exit:
 }
 
 func recMsg(pid *Pid, context *Context, stop **initStop) {

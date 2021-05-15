@@ -13,7 +13,7 @@ var isStop = false
 
 // 停止整个服务
 func InitStop() {
-	ErrorLog("init stop")
+	ErrorLog("system going to init stop")
 	CallTimeOut(initServerPid, &initStop{}, 600)
 }
 

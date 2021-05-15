@@ -38,6 +38,87 @@ func ModSelectAll(db *sql.DB, tab string, key ...interface{}) []interface{} {
 	return sl
 }
 
+func ModSelectAllWhere(db *sql.DB, tab string, where string) []interface{} {
+	def := getDef(tab)
+	rows, err := db.Query(fmt.Sprintf("select * from %s where %s", def.Name, where))
+	defer func() {
+		if rows != nil {
+			rows.Close()
+		}
+	}()
+	if err != nil {
+		kernel.ErrorLog("%s", err.Error())
+		return nil
+	}
+	sl := make([]interface{}, 0, 2)
+	for rows.Next() {
+		rs := toRow(def, rows.Scan)
+		sl = append(sl, rs)
+	}
+	return sl
+}
+
+func ModSelect(db *sql.DB, tab string, fields []string, where string) [][]interface{} {
+	rows, err := db.Query(fmt.Sprintf("select %s from %s where %s", strings.Join(fields, ","), tab, where))
+	defer func() {
+		if rows != nil {
+			rows.Close()
+		}
+	}()
+	if err != nil {
+		kernel.ErrorLog("%s", err.Error())
+		return nil
+	}
+	def := getDef(tab)
+	sl := make([][]interface{}, 0, 2)
+	fileNum := len(fields)
+	for rows.Next() {
+		scan := make([]interface{}, fileNum, fileNum)
+		for i := 0; i < fileNum; i++ {
+			f := def.nameType[fields[i]]
+			switch f.Kind() {
+			case reflect.Bool:
+				var v int
+				scan[i] = &v
+			case reflect.Slice, reflect.Map, reflect.Struct, reflect.Ptr:
+				var buf []byte
+				scan[i] = &buf
+			default:
+				scan[i] = reflect.New(f).Interface()
+			}
+		}
+		err = rows.Scan(scan...)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				kernel.ErrorLog("%s", err.Error())
+			}
+		} else {
+			rs := make([]interface{}, fileNum, fileNum)
+			for i := 0; i < fileNum; i++ {
+				f := def.nameType[fields[i]]
+				switch f.Kind() {
+				case reflect.Bool:
+					rs[i] = *scan[i].(*int) == 1
+				case reflect.Slice, reflect.Map, reflect.Struct:
+					v := reflect.New(f)
+					de := gob.NewDecoder(bytes.NewReader(*scan[i].(*[]byte)))
+					de.DecodeValue(v)
+					rs[i] = v.Elem().Interface()
+				case reflect.Ptr:
+					v := reflect.New(f.Elem())
+					de := gob.NewDecoder(bytes.NewReader(*scan[i].(*[]byte)))
+					de.DecodeValue(v)
+					rs[i] = v.Interface()
+				default:
+					rs[i] = reflect.ValueOf(scan[i]).Elem().Interface()
+				}
+			}
+			sl = append(sl, scan)
+		}
+	}
+	return sl
+}
+
 func ModUpdate(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
 	def := getDef(tab)
 	sqlStr := fmt.Sprintf("update %s set %s where %s", def.Name, updateValue(def, data), GetWherePKey(def, data))
@@ -48,7 +129,16 @@ func ModUpdate(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
 	return ret, err
 }
 
-	func ModInsert(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
+func ModUpdateFields(db *sql.DB, tab string,fields []string, data []interface{},where string) (sql.Result, error) {
+	sqlStr := fmt.Sprintf("update %s set %s where %s", tab, updateFieldValue(fields, data), where)
+	ret, err := db.Exec(sqlStr)
+	if err != nil {
+		kernel.ErrorLog("%s", err.Error())
+	}
+	return ret, err
+}
+
+func ModInsert(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
 	def := getDef(tab)
 	sqlStr := fmt.Sprintf("insert into %s values (%s);", def.Name, insertValue(def, data))
 	ret, err := db.Exec(sqlStr)
@@ -58,7 +148,7 @@ func ModUpdate(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
 	return ret, err
 }
 
-	func ModDelete(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
+func ModDelete(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
 	def := getDef(tab)
 	sqlStr := fmt.Sprintf("delete from %s where (%s);", def.Name, GetWherePKey(def, data))
 	ret, err := db.Exec(sqlStr)
@@ -79,7 +169,9 @@ func ModDeletePKey(db *sql.DB, tab string, pkey ...interface{}) (sql.Result, err
 }
 
 func GetWhere(def *TabDef, key ...interface{}) string {
-	if len(key) == 1 {
+	if len(key) == 0 {
+		return " 1 "
+	} else if len(key) == 1 {
 		switch key[0].(type) {
 		case bool:
 			return " 1 "
@@ -114,11 +206,19 @@ func updateValue(def *TabDef, data interface{}) string {
 		vt = vt.Elem()
 	}
 	fieldNum := vf.NumField()
-	sl := make([]string,fieldNum,fieldNum)
+	sl := make([]string, fieldNum, fieldNum)
 	for i := 0; i < fieldNum; i++ {
 		t := vt.Field(i)
 		f := vf.Field(i)
 		sl[i] = fmt.Sprintf("%s = %s", t.Name, encodeValue(&f))
+	}
+	return strings.Join(sl, ",")
+}
+
+func updateFieldValue(fields []string, data []interface{}) string {
+	sl := make([]string, len(fields))
+	for i,v := range fields {
+		sl[i] = fmt.Sprintf("%s = %s",v,data[i])
 	}
 	return strings.Join(sl, ",")
 }
@@ -129,7 +229,7 @@ func insertValue(def *TabDef, data interface{}) string {
 		vf = vf.Elem()
 	}
 	fileNum := vf.NumField()
-	sl := make([]string,fileNum,fileNum)
+	sl := make([]string, fileNum, fileNum)
 	for i := 0; i < fileNum; i++ {
 		f := vf.Field(i)
 		sl[i] = encodeValue(&f)
@@ -149,7 +249,7 @@ func toRow(def *TabDef, scanF scanFunc) interface{} {
 		case reflect.Bool:
 			var v int
 			scan[i] = &v
-		case reflect.Slice,reflect.Map,reflect.Struct,reflect.Ptr:
+		case reflect.Slice, reflect.Map, reflect.Struct, reflect.Ptr:
 			var buf []byte
 			scan[i] = &buf
 		default:
@@ -169,7 +269,7 @@ func toRow(def *TabDef, scanF scanFunc) interface{} {
 		switch f.Kind() {
 		case reflect.Bool:
 			f.SetBool(*scan[i].(*int) == 1)
-		case reflect.Slice,reflect.Map,reflect.Struct:
+		case reflect.Slice, reflect.Map, reflect.Struct:
 			v := reflect.New(f.Type())
 			de := gob.NewDecoder(bytes.NewReader(*scan[i].(*[]byte)))
 			de.DecodeValue(v)
@@ -196,4 +296,3 @@ func toBinary(f *reflect.Value) []byte {
 		return buf.Bytes()
 	}
 }
-

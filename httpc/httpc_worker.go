@@ -40,7 +40,7 @@ var workerActor = &kernel.Actor{
 				if m.ssl {
 					client = state.sslClient
 				}
-				client.Timeout = time.Second*3
+				client.Timeout = 3*time.Second
 				if m.method == "GET" {
 					rsp, err := client.Get(m.url)
 					responseFunc(rsp,err,m)
@@ -71,21 +71,14 @@ var workerActor = &kernel.Actor{
 func responseFunc(rsp *http.Response,err error,m *requestData)  {
 	if err != nil {
 		kernel.ErrorLog("httpc %s err:%#v",m.url,err)
-		responseResult(m,false,nil)
+		m.ch <- response{ok: false,rsp: nil}
 	}else {
 		defer rsp.Body.Close()
 		if rsp.StatusCode == 200 {
 			body, _ := ioutil.ReadAll(rsp.Body)
-			responseResult(m,true,body)
+			m.ch <- response{ok: true, rsp: body}
 		}else{
-			kernel.ErrorLog("http code:%d",rsp.StatusCode)
-			responseResult(m,false,nil)
+			m.ch <- response{ok: false, rsp: nil}
 		}
-	}
-}
-
-func responseResult(m *requestData,ok bool,body []byte)  {
-	if atomic.LoadInt32(&m.close) == 0 {
-		m.ch <- response{ok: ok, rsp: body}
 	}
 }

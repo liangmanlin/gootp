@@ -17,7 +17,7 @@ func TestKernelStart(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			A := DefaultActor()
 			A.Init = func(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
-				TimerStart(TimerTypeForever, pid, 100, 1)
+				SendAfter(TimerTypeForever, pid, 100, 1)
 				ErrorLog("start :%s",pid)
 				return nil
 			}

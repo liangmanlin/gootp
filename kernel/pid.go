@@ -6,11 +6,11 @@ import (
 )
 
 type Pid struct {
+	isAlive int32 // 放在第一个位置，有利于cpu快速定位
 	id      int64
 	c       chan interface{}
 	call    chan interface{}
 	node    *Node // 添加分布式支持
-	isAlive int32
 }
 
 func (p *Pid) GetChannel() chan interface{} {
@@ -33,6 +33,11 @@ func (p *Pid) IsAlive() bool {
 		return false
 	}
 	return atomic.LoadInt32(&p.isAlive) == 1
+}
+
+// 在一些阻塞的进程里，可以设置为消亡，这样停服就不会卡主
+func (p *Pid) SetDie() {
+	atomic.StoreInt32(&p.isAlive,0)
 }
 
 func (p *Pid) Node() *Node {

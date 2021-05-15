@@ -1,7 +1,6 @@
 package gate
 
 import (
-	"fmt"
 	"github.com/liangmanlin/gootp/kernel"
 	"log"
 )
@@ -12,29 +11,12 @@ var addrMap = make(map[string]string)
 
 func Start(name string, handler *kernel.Actor, port int, opt ...interface{}) {
 	ensureSupStart()
-	supName := fmt.Sprintf("gate_child_sup_%s", name)
-	child := &kernel.SupChild{Name: supName, ReStart: false, ChildType: kernel.SupChildTypeSup}
-	_, childSup := kernel.SupStartChild(gateSupName, child)
-	clientSup := fmt.Sprintf("gate_client_sup_%s", name)
-	child = &kernel.SupChild{Name: clientSup, ReStart: false, ChildType: kernel.SupChildTypeSup}
-	_, csPid := kernel.SupStartChild(supName, child)
-	// 启动侦听进程
-	listenerName := fmt.Sprintf("gate_listener_%s", name)
-	args := kernel.MakeArgs(name, handler, port, csPid, childSup, opt)
-	child = &kernel.SupChild{Name: listenerName, ReStart: true, ChildType: kernel.SupChildTypeWorker, Svr: listenerActor, InitArgs: args}
-	err, _ := kernel.SupStartChild(supName, child)
-	if err != nil {
-		kernel.ErrorLog("%#v", err)
-		log.Panic(err)
-	}
-	if port > 0 {
-		kernel.ErrorLog("[%s] listening on port: [0.0.0.0:%d]", name, port)
-	}
+	a := &app{name: name,handler: handler,port: port,opt: opt}
+	kernel.AppStart(a)
 }
 
-func Stop() {
-	kernel.SupStop(gateSupName)
-	kernel.ErrorLog("gate stopped")
+func Stop(name string) {
+	kernel.AppStop(name)
 }
 
 func ensureSupStart() {

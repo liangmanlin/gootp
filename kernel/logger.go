@@ -28,13 +28,12 @@ var logLevel LogLevel = 2
 type logData struct {
 	module string
 	line   int
-	format string
-	args   []interface{}
+	log    string
 }
 
 var logWriter io.Writer
 
-func TouchLogger(writer io.Writer) {
+func Touch(writer io.Writer) {
 	Env.LogPath = ""
 	logWriter = writer
 }
@@ -61,6 +60,17 @@ func ErrorLog(format string, args ...interface{}) {
 		file = filepath.Base(file)
 	}
 	sendLog(file, line, format, args...)
+}
+
+func UnHandleMsg(msg interface{})  {
+	_, file, line, ok := runtime.Caller(1)
+	if !ok {
+		file = "???"
+		line = 0
+	} else {
+		file = filepath.Base(file)
+	}
+	sendLog(file, line, "un handle msg : %#v", msg)
 }
 
 func startLogger() {
@@ -138,11 +148,11 @@ func startLogTimer(self *Pid) {
 	t := time.Now()
 	_, min, sec := t.Clock()
 	less := hourMillisecond - (int64(min)*minMillisecond + int64(sec)*Millisecond)
-	TimerStart(TimerTypeOnce, self, less, makeFile(1))
+	SendAfter(TimerTypeOnce, self, less, makeFile(1))
 }
 
 func sendLog(module string, line int, format string, args ...interface{}) () {
-	msg := &logData{module: module, line: line, format: format, args: args}
+	msg := &logData{module: module, line: line, log: fmt.Sprintf(format,args...)}
 	if loggerServerPid != nil {
 		Cast(loggerServerPid, msg)
 	} else if Env.LogPath != "" {
@@ -162,9 +172,8 @@ func writeLog(w io.Writer, data *logData) {
 	t := time.Now()
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
-	format := fmt.Sprintf("\n%d-%d-%d %d:%02d:%02d [%s:%d] %s\n",
-		year, month, day, hour, min, sec, data.module, data.line, data.format)
-	_, _ = fmt.Fprintf(w, format, data.args...)
+	_, _ = fmt.Fprintf(w, "\n%d-%d-%d %d:%02d:%02d [%s:%d] %s\n",
+		year, month, day, hour, min, sec, data.module, data.line,data.log)
 }
 
 func makeLogFile() *os.File {

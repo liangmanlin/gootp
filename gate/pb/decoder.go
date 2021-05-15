@@ -128,12 +128,18 @@ func (c *Coder)decodeMap(buf []byte,index int,child reflect.Type)(int,reflect.Va
 	kt := child.Key()
 	vt := child.Elem()
 	keyFunc,_ := c.getDecodeFunc(kt)
+	var vkRs func(v reflect.Value)reflect.Value
+	if kt.Kind() == reflect.Struct {
+		vkRs = vtReturnElem
+	} else {
+		vkRs = vrReturn
+	}
 	decFunc,child2 := c.getDecodeFunc(vt)
 	var vk,vv reflect.Value
 	for index < end{
-		index ,vk = keyFunc(buf,index,nil)
+		index ,vk = keyFunc(buf,index,kt)
 		index ,vv = decFunc(buf,index,child2)
-		m.SetMapIndex(vk,vv)
+		m.SetMapIndex(vkRs(vk),vv)
 	}
 	return end,m
 }
@@ -211,7 +217,6 @@ func (c *Coder)getDecodeFunc(t reflect.Type) (fieldDecodeFunc,reflect.Type) {
 	case reflect.String:
 		return c.decodeString,nil
 	case reflect.Slice:
-		t = t.Elem()
 		return c.decodeSlice,t
 	case reflect.Map:
 		return c.decodeMap,t
@@ -231,6 +236,11 @@ func DecodeInt64(buf []byte, index int) (int, int64) {
 	return index+8,v
 }
 
+func DecodeInt32(buf []byte, index int) (int, int32) {
+	v := int32(buf[index]) << 24 + int32(buf[index+1]) << 16 + int32(buf[index+2]) << 8 + int32(buf[index+3])
+	return index+8,v
+}
+
 func DecodeString(buf []byte, index int)(int, string) {
 	var size int
 	size = int(buf[index]) << 8
@@ -239,4 +249,12 @@ func DecodeString(buf []byte, index int)(int, string) {
 	end := index+size
 	v := string(buf[index:end])
 	return end, v
+}
+
+func vtReturnElem(v reflect.Value) reflect.Value {
+	return v.Elem()
+}
+
+func vrReturn(v reflect.Value) reflect.Value {
+	return v
 }

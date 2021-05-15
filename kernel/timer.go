@@ -54,7 +54,7 @@ type actorTimer struct {
 	msg       interface{}
 }
 
-func TimerStart(timerType timerType, pid *Pid, inv int64, msg interface{}) {
+func SendAfter(timerType timerType, pid *Pid, inv int64, msg interface{}) {
 	ti := &actorTimer{timerType: timerType, inv: inv, pid: pid, msg: msg, d: Now2() + inv}
 	rc <- ti
 }

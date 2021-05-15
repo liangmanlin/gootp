@@ -10,6 +10,29 @@ var _i = int(0)
 
 const cpuSize = unsafe.Sizeof(&_i) // 预先计算出int指针的大小
 
+func (c *Coder) EncodeBuff(proto interface{}, head int, buf []byte) (minBuf []byte) {
+	rt := getRType(proto)
+	def := c.getDefTF(rt)
+	// 前期就可以计算出最小buff，减少多余的内存申请
+	sizeBuf := len(buf)
+	totalSize := def.minBufSize + head + 2 + sizeBuf
+	if cap(buf) >= totalSize {
+		minBuf = buf[0 : 2+head+sizeBuf : totalSize]
+	} else {
+		minBuf = make([]byte, 2+head+sizeBuf, totalSize)
+		copy(minBuf, buf)
+	}
+	// 压入协议编号 大端
+	writeSize(minBuf[sizeBuf:], head, def.id)
+	ptr := *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(&proto)) + cpuSize)) // TODO 这里是根据interface 的内部实现写死的地址
+	minBuf = c.encodeDef(minBuf, ptr, rt, def)
+	if head > 0 {
+		size := len(minBuf) - head
+		writeSizeHead(minBuf, head, size)
+	}
+	return minBuf
+}
+
 // 打包的数据可以直接发送，无需添加头部
 func (c *Coder) Encode(proto interface{}, head int) []byte {
 	rt := getRType(proto)
@@ -135,13 +158,13 @@ func (c *Coder) encodeInt64(buf []byte, ptr unsafe.Pointer, _ reflect.Type) []by
 
 func (c *Coder) encodeFloat32(buf []byte, ptr unsafe.Pointer, _ reflect.Type) []byte {
 	bits := *(*uint32)(ptr)
-	buf = append(buf, byte(bits >> 24),byte(bits >> 16),byte(bits >> 8),byte(bits))
+	buf = append(buf, byte(bits>>24), byte(bits>>16), byte(bits>>8), byte(bits))
 	return buf
 }
 
 func (c *Coder) encodeFloat64(buf []byte, ptr unsafe.Pointer, _ reflect.Type) []byte {
 	bits := *(*uint64)(ptr)
-	buf = append(buf, byte(bits >> 56),byte(bits >> 48),byte(bits >> 40),byte(bits >> 32),byte(bits >> 24),byte(bits >> 16),byte(bits >> 8),byte(bits))
+	buf = append(buf, byte(bits>>56), byte(bits>>48), byte(bits>>40), byte(bits>>32), byte(bits>>24), byte(bits>>16), byte(bits>>8), byte(bits))
 	return buf
 }
 
@@ -162,7 +185,7 @@ func (c *Coder) encodeByteArray(buf []byte, ptr unsafe.Pointer, _ reflect.Type) 
 }
 
 func (c *Coder) encodeSlice(buf []byte, ptr unsafe.Pointer, child reflect.Type) []byte {
-	lens := *(*int)(unsafe.Pointer(uintptr(ptr) + cpuSize)) // TODO 这里是根据interface 的内部实现写死的地址
+	lens := *(*int)(unsafe.Pointer(uintptr(ptr) + cpuSize))
 	buf = c.encodeUint16V(buf, 0)
 	if lens == 0 {
 		return buf
@@ -197,13 +220,19 @@ func (c *Coder) encodeMap(buf []byte, ptr unsafe.Pointer, child reflect.Type) []
 	start := len(buf)
 	keyType := value.Type().Key()
 	valueType := value.Type().Elem()
+	var keyPtrFun func(ptr unsafe.Pointer) unsafe.Pointer
+	if keyType.Kind() == reflect.Struct {
+		keyPtrFun = getStructPtr
+	} else {
+		keyPtrFun = getValuePtr
+	}
 	enKeyFunc := c.getEncodeFunc(keyType)
 	enValueFunc := c.getEncodeFunc(valueType)
 	ranges := value.MapRange()
 	for ranges.Next() {
 		kv := ranges.Key()
-		// TODO 这里是根据interface 的内部实现写死的地址
-		buf = enKeyFunc(buf, *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(&kv)) + cpuSize)), nil)
+		// TODO 这里是根据reflect.Value 的内部实现写死的地址
+		buf = enKeyFunc(buf, keyPtrFun(unsafe.Pointer(&kv)), keyType)
 		vv := ranges.Value()
 		buf = enValueFunc(buf, *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(&vv)) + cpuSize)), valueType)
 	}
@@ -272,21 +301,36 @@ func getPtrPtr(pointer unsafe.Pointer, offset uintptr) unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(uintptr(pointer) + offset))
 }
 
-func WriteInt64(buf []byte, v int64,index int){
-	buf[index] = uint8(v>>56)
-	buf[index+1] = uint8(v>>48)
-	buf[index+2] = uint8(v>>40)
-	buf[index+3] = uint8(v>>32)
-	buf[index+4] = uint8(v>>24)
-	buf[index+5] = uint8(v>>16)
-	buf[index+6] = uint8(v>>8)
+func getStructPtr(pointer unsafe.Pointer) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(pointer) + cpuSize)
+}
+
+func getValuePtr(pointer unsafe.Pointer) unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(uintptr(pointer) + cpuSize))
+}
+
+func WriteInt64(buf []byte, v int64, index int) {
+	buf[index] = uint8(v >> 56)
+	buf[index+1] = uint8(v >> 48)
+	buf[index+2] = uint8(v >> 40)
+	buf[index+3] = uint8(v >> 32)
+	buf[index+4] = uint8(v >> 24)
+	buf[index+5] = uint8(v >> 16)
+	buf[index+6] = uint8(v >> 8)
 	buf[index+7] = uint8(v)
+}
+
+func WriteIn32(buf []byte, v int32, index int) {
+	buf[index] = uint8(v >> 24)
+	buf[index+1] = uint8(v >> 16)
+	buf[index+2] = uint8(v >> 8)
+	buf[index+3] = uint8(v)
 }
 
 func WriteString(buf []byte, str string, index int) []byte {
 	v := *(*[]byte)(unsafe.Pointer(&str))
 	size := len(v)
-	buf[index] = uint8(size>>8)
+	buf[index] = uint8(size >> 8)
 	buf[index+1] = uint8(size)
-	return append(buf,v...)
+	return append(buf, v...)
 }

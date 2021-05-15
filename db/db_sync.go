@@ -112,11 +112,11 @@ func startSync(db *sql.DB) {
 }
 
 type dbSync struct {
-	db             *sql.DB
+	db *sql.DB
 }
 
 var dbSyncActor = &kernel.Actor{
-	Init: func(context *kernel.Context,pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *kernel.Context, pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
 		d := dbSync{}
 		d.db = args[0].(*sql.DB)
 		return unsafe.Pointer(&d)

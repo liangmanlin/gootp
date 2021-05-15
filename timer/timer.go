@@ -40,7 +40,7 @@ func (t *Timer) Add(key TimerKey, inv, times int32, f interface{}, args ...inter
 	}
 }
 
-func (t *Timer) Del(key TimerKey) {
+func (t *Timer)Del(key TimerKey)  {
 	delete(t.m,key)
 }
 

@@ -22,7 +22,8 @@ var kernelAliveMap sync.Map
 func KernelStart(start func(), stop func()) {
 	StartName(initServerName, initActor)
 	kernelChild := []*SupChild{
-		{Name: selfServerName, Svr: selfSenderActor},
+		{Name: selfServerName, Svr: selfSenderActor,ReStart: true},
+		{Name: "application", Svr: appSvr,ReStart: true},
 	}
 	kernel := SupStart("kernel", kernelChild)
 	addToKernelMap(kernel)
@@ -109,4 +110,8 @@ func DefaultActor() *Actor {
 		},
 	}
 	return actor
+}
+
+func Link(srcPid,destPid *Pid)  {
+	Cast(destPid,&actorOP{op: &link{pid: srcPid}})
 }
