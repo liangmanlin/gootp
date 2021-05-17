@@ -1,8 +1,8 @@
-# Gootp
+# Golang/OTP
 
 ## go simple otp
 
-### `kernel`提供`supervisor` `gen_server`类似的行为
+### `kernel`提供`application` `supervisor` `gen_server`类似的行为
 
 ### `node`提供多节点功能
 
