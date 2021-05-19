@@ -1,6 +1,6 @@
 # Golang/OTP
 
-## go simple otp
+## go actor framework & go simple otp
 
 ### `kernel`提供`application` `supervisor` `gen_server`类似的行为
 
