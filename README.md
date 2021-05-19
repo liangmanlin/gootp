@@ -10,4 +10,6 @@
 
 - 目前暂时没有支持windows的想法
 
+### 完整使用例子 [go-game-server](https://github.com/liangmanlin/go-game-server)
+
 ## 更多详情请查阅 [WIKI](https://github.com/liangmanlin/gootp/wiki)
