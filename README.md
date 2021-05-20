@@ -15,7 +15,7 @@
 ```golang
 
 import (
-  "https://github.com/liangmanlin/gootp/kernel"
+  "github.com/liangmanlin/gootp/kernel"
   "unsafe"
 )
 
