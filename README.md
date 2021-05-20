@@ -10,6 +10,31 @@
 
 - 目前暂时没有支持windows的想法
 
+### 一个简单的例子
+
+```golang
+
+import "https://github.com/liangmanlin/gootp/kernel"
+
+func main(){
+  kernel.KernelStart(func(){
+    actor := kernel.DefaultActor()
+    actor.Init = func(ctx *kernel.Context,pid *kernel.Pid,args ...interface{})unsafe.Pointer{
+      kernel.SendAfter(kernel.TimerTypeForever,pid,2000,true)
+      return nil
+    }
+    actor.HandleCast = func(ctx *kernel.Context,msg interface{}){
+      switch msg.(type) {
+      case bool:
+        kernel.ErrorLog("loop")
+      }
+    }
+    kernel.Start(actor)
+  },nil)
+}
+
+```
+
 ### 完整使用例子 [go-game-server](https://github.com/liangmanlin/go-game-server)
 
 ## 更多详情请查阅 [WIKI](https://github.com/liangmanlin/gootp/wiki)
