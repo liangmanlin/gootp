@@ -14,7 +14,10 @@
 
 ```golang
 
-import "https://github.com/liangmanlin/gootp/kernel"
+import (
+  "https://github.com/liangmanlin/gootp/kernel"
+  "unsafe"
+)
 
 func main(){
   kernel.KernelStart(func(){
