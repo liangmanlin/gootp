@@ -260,7 +260,7 @@ func IsThrough(sx, sy, tx, ty int32, walkAble func(x, y int32) bool) bool {
 	x := sx
 	y := sy
 	if dy < dx {
-		n2dy := y << 1 // * 2
+		n2dy := dy << 1 // * 2
 		n2dydx := (dy - dx) << 1
 		d := (dy << 1) - dx
 		for {
@@ -323,7 +323,7 @@ func IsThroughBorder(sx, sy, tx, ty int32, walkAbleBorder func(x, y int32, c int
 	y := sy
 	var c int
 	if dy < dx {
-		n2dy := y << 1 // * 2
+		n2dy := dy << 1 // * 2
 		n2dydx := (dy - dx) << 1
 		d := (dy << 1) - dx
 		for {
