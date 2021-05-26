@@ -11,9 +11,14 @@ var initServerPid *Pid = nil
 
 var isStop = false
 
+var stopCB func() = nil
+
 // 停止整个服务
 func InitStop() {
 	ErrorLog("system going to init stop")
+	if !isStop && stopCB != nil {
+		stopCB()
+	}
 	CallTimeOut(initServerPid, &initStop{}, 600)
 }
 
@@ -25,7 +30,6 @@ type initStop struct {
 
 type initState struct {
 	started *kct.BMap
-	stopCB  func()
 }
 
 var initActor = &Actor{
@@ -33,7 +37,7 @@ var initActor = &Actor{
 		ErrorLog("%s %s started", initServerName, pid)
 		initServerPid = pid
 		addToKernelMap(pid)
-		return unsafe.Pointer(&initState{started: kct.NewBMap(), stopCB: nil})
+		return unsafe.Pointer(&initState{started: kct.NewBMap()})
 	},
 	HandleCast: func(context *Context, msg interface{}) {
 		state := (*initState)(context.State)
@@ -49,15 +53,12 @@ var initActor = &Actor{
 		switch r := request.(type) {
 		case *initStop:
 			if !isStop {
-				if state.stopCB != nil {
-					state.stopCB()
-				}
 				isStop = true
 				initStopF(state, context)
 			}
 			return nil
 		case stopFunc:
-			state.stopCB = r
+			stopCB = r
 		}
 		return nil
 	},
