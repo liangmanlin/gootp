@@ -12,15 +12,15 @@ import (
 
 type scanFunc func(...interface{}) error
 
-func ModSelectRow(db *sql.DB, tab string, key ...interface{}) interface{} {
-	def := getDef(tab)
-	row := db.QueryRow(fmt.Sprintf("select * from %s where %s", def.Name, GetWhere(def, key...)))
+func (g *Group)ModSelectRow(tab string, key ...interface{}) interface{} {
+	def := g.GetDef(tab)
+	row := g.db.QueryRow(fmt.Sprintf("select * from %s where %s", def.Name, GetWhere(def, key...)))
 	return toRow(def, row.Scan)
 }
 
-func ModSelectAll(db *sql.DB, tab string, key ...interface{}) []interface{} {
-	def := getDef(tab)
-	rows, err := db.Query(fmt.Sprintf("select * from %s where %s", def.Name, GetWhere(def, key...)))
+func (g *Group)ModSelectAll(tab string, key ...interface{}) []interface{} {
+	def := g.GetDef(tab)
+	rows, err := g.db.Query(fmt.Sprintf("select * from %s where %s", def.Name, GetWhere(def, key...)))
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -38,9 +38,9 @@ func ModSelectAll(db *sql.DB, tab string, key ...interface{}) []interface{} {
 	return sl
 }
 
-func ModSelectAllWhere(db *sql.DB, tab string, where string) []interface{} {
-	def := getDef(tab)
-	rows, err := db.Query(fmt.Sprintf("select * from %s where %s", def.Name, where))
+func (g *Group)ModSelectAllWhere(tab string, where string) []interface{} {
+	def := g.GetDef(tab)
+	rows, err := g.db.Query(fmt.Sprintf("select * from %s where %s", def.Name, where))
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -58,8 +58,8 @@ func ModSelectAllWhere(db *sql.DB, tab string, where string) []interface{} {
 	return sl
 }
 
-func ModSelect(db *sql.DB, tab string, fields []string, where string) [][]interface{} {
-	rows, err := db.Query(fmt.Sprintf("select %s from %s where %s", strings.Join(fields, ","), tab, where))
+func (g *Group)ModSelect(tab string, fields []string, where string) [][]interface{} {
+	rows, err := g.db.Query(fmt.Sprintf("select %s from %s where %s", strings.Join(fields, ","), tab, where))
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -69,7 +69,7 @@ func ModSelect(db *sql.DB, tab string, fields []string, where string) [][]interf
 		kernel.ErrorLog("%s", err.Error())
 		return nil
 	}
-	def := getDef(tab)
+	def := g.GetDef(tab)
 	sl := make([][]interface{}, 0, 2)
 	fileNum := len(fields)
 	for rows.Next() {
@@ -119,49 +119,63 @@ func ModSelect(db *sql.DB, tab string, fields []string, where string) [][]interf
 	return sl
 }
 
-func ModUpdate(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
-	def := getDef(tab)
+func (g *Group)ModUpdate(tab string, data interface{}) (sql.Result, error) {
+	def := g.GetDef(tab)
 	sqlStr := fmt.Sprintf("update %s set %s where %s", def.Name, updateValue(def, data), GetWherePKey(def, data))
-	ret, err := db.Exec(sqlStr)
+	ret, err := g.db.Exec(sqlStr)
 	if err != nil {
 		kernel.ErrorLog("%s", err.Error())
 	}
 	return ret, err
 }
 
-func ModUpdateFields(db *sql.DB, tab string,fields []string, data []interface{},where string) (sql.Result, error) {
+func (g *Group)ModUpdateFields(tab string,fields []string, data []interface{},where string) (sql.Result, error) {
 	sqlStr := fmt.Sprintf("update %s set %s where %s", tab, updateFieldValue(fields, data), where)
-	ret, err := db.Exec(sqlStr)
+	ret, err := g.db.Exec(sqlStr)
 	if err != nil {
 		kernel.ErrorLog("%s", err.Error())
 	}
 	return ret, err
 }
 
-func ModInsert(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
-	def := getDef(tab)
+func (g *Group)ModInsert(tab string, data interface{}) (sql.Result, error) {
+	def := g.GetDef(tab)
 	sqlStr := fmt.Sprintf("insert into %s values (%s);", def.Name, insertValue(def, data))
-	ret, err := db.Exec(sqlStr)
+	ret, err := g.db.Exec(sqlStr)
 	if err != nil {
 		kernel.ErrorLog("%s", err.Error())
 	}
 	return ret, err
 }
 
-func ModDelete(db *sql.DB, tab string, data interface{}) (sql.Result, error) {
-	def := getDef(tab)
+func (g *Group)ModMultiInsert(tab string, data []interface{}) (sql.Result, error) {
+	def := g.GetDef(tab)
+	sl := make([]string,0,len(data))
+	for _,d := range data{
+		sl = append(sl,insertValue(def, d))
+	}
+	sqlStr := fmt.Sprintf("insert into %s values (%s);", def.Name, strings.Join(sl,","))
+	ret, err := g.db.Exec(sqlStr)
+	if err != nil {
+		kernel.ErrorLog("%s,error:%s", sqlStr,err.Error())
+	}
+	return ret, err
+}
+
+func (g *Group)ModDelete(tab string, data interface{}) (sql.Result, error) {
+	def := g.GetDef(tab)
 	sqlStr := fmt.Sprintf("delete from %s where (%s);", def.Name, GetWherePKey(def, data))
-	ret, err := db.Exec(sqlStr)
+	ret, err := g.db.Exec(sqlStr)
 	if err != nil {
 		kernel.ErrorLog("%s", err.Error())
 	}
 	return ret, err
 }
 
-func ModDeletePKey(db *sql.DB, tab string, pkey ...interface{}) (sql.Result, error) {
-	def := getDef(tab)
+func (g *Group)ModDeletePKey(tab string, pkey ...interface{}) (sql.Result, error) {
+	def := g.GetDef(tab)
 	sqlStr := fmt.Sprintf("delete from %s where (%s);", def.Name, GetWhere(def, pkey...))
-	ret, err := db.Exec(sqlStr)
+	ret, err := g.db.Exec(sqlStr)
 	if err != nil {
 		kernel.ErrorLog("%s", err.Error())
 	}

@@ -1,6 +1,8 @@
 package kernel
 
-import "unsafe"
+import (
+	"container/list"
+)
 
 type actorOP struct {
 	op interface{}
@@ -11,6 +13,8 @@ type regName string
 type link struct {
 	pid *Pid
 }
+
+type ActorChanCacheSize int
 
 type PidExit struct {
 	Pid    *Pid
@@ -32,7 +36,7 @@ type msgQueue struct {
 }
 
 const (
-	actorCodeNone int = 1 << iota
+	actorCodeNone = iota + 1
 	actorCodeExit
 	actorCodeInitStop
 )
@@ -45,14 +49,16 @@ type CallError struct {
 }
 
 const (
-	CallErrorTypeTimeOut = 1 << iota
+	CallErrorTypeTimeOut callErrorType = iota + 1
+	CallErrorTypeNoProc
+	CallErrorTypeNodeNotConnect
 )
 
 type stop string
 
 type stopFunc func()
 
-type InitFunc func(ctx *Context, pid *Pid, args ...interface{}) unsafe.Pointer
+type InitFunc func(ctx *Context, pid *Pid, args ...interface{}) interface{}
 type HandleCastFunc func(ctx *Context, msg interface{})
 type HandleCallFunc func(ctx *Context, request interface{}) interface{}
 type TerminateFunc func(ctx *Context, reason *Terminate)
@@ -66,8 +72,10 @@ type Actor struct {
 	// 接受同步调用
 	HandleCall HandleCallFunc
 	// actor退出回调
+	// 非必要实现函数
 	Terminate TerminateFunc
 	// 当发生catch错误时调用，如果返回false，那么进程将会退出
+	// 非必要实现函数
 	ErrorHandler ErrorHandleFunc
 }
 
@@ -109,13 +117,14 @@ type Application interface {
 	Name() string
 	Start(bootType AppBootType) *Pid // return the supervisor pid
 	Stop(stopType AppStopType)
-	SetEnv(Key string,value interface{})
+	SetEnv(Key string, value interface{})
 	GetEnv(key string) interface{}
 }
 
 type appInfo struct {
 	app Application
 	pid *Pid
+	e   *list.Element
 }
 
 type AppBootType int
@@ -131,4 +140,19 @@ const (
 	APP_STOP_TYPE_RESTART
 )
 
+type ConsoleCommand struct {
+	RecvPid *Pid
+	CType   int32
+	Command string
+}
 
+type Loop struct{}
+
+type callMode int
+
+const (
+	call_mode_normal   callMode = iota + 1
+	call_mode_no_reply          // 特殊模式，会向内部传递CallInfo
+)
+
+type Empty struct {}

@@ -1,17 +1,16 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
+	"github.com/liangmanlin/gootp/crypto"
 	"github.com/liangmanlin/gootp/kernel"
-	"github.com/liangmanlin/gootp/kernel/crypto"
 	"log"
 	"reflect"
 	"strings"
 )
 
-func tableCheck(db *sql.DB) {
-	rows, err := db.Query("show tables;")
+func tableCheck(group *Group) {
+	rows, err := group.db.Query("show tables;")
 	if err != nil {
 		if rows != nil {
 			rows.Close()
@@ -19,7 +18,7 @@ func tableCheck(db *sql.DB) {
 		kernel.ErrorLog(err.Error())
 		log.Panic(err.Error())
 	}
-	tabs := make(map[string]string, len(dbTabDef))
+	tabs := make(map[string]string, len(group.dbTabDef))
 	for rows.Next() {
 		var tabName string
 		err = rows.Scan(&tabName)
@@ -28,35 +27,35 @@ func tableCheck(db *sql.DB) {
 	}
 	_ = rows.Close()
 	if _, ok := tabs["db_version"]; !ok {
-		tabs["db_version"] = createTable(db, "db_version")
+		tabs["db_version"] = createTable(group, "db_version")
 	}
-	vers := SyncSelect(nil, "db_version", 1, true)
+	vers := group.SyncSelect(kernel.Call, "db_version", 1, true)
 	for _, v := range vers {
 		v2 := v.(*dbVersion)
 		tabs[v2.TabName] = v2.Version
 	}
-	for tabName, def := range dbTabDef {
+	for tabName, def := range group.dbTabDef {
 		md5, ok := tabs[tabName]
 		if !ok {
-			tabs[tabName] = createTable(db, tabName)
+			tabs[tabName] = createTable(group, tabName)
 			continue
 		}
 		md52 := tabMd5(def.DataStruct)
 		if md5 != md52 {
 			kernel.ErrorLog("tab:[%s] check fields,ver: %s,old ver: %s", tabName, md5, md52)
 			tabs[tabName] = md52
-			checkField(db, def, md52)
+			checkField(group, def, md52)
 		}
 	}
 }
 
-func createTable(db *sql.DB, tab string) string {
-	def := getDef(tab)
+func createTable(group *Group, tab string) string {
+	def := group.GetDef(tab)
 	md5Str := tabMd5(def.DataStruct)
 	sqlStr := genCreateSql(def)
-	_, err := db.Exec(sqlStr)
+	_, err := group.db.Exec(sqlStr)
 	ifExit(err)
-	SyncInsert("db_version", 1, &dbVersion{TabName: tab, Version: md5Str})
+	group.SyncInsert("db_version", 1, &dbVersion{TabName: tab, Version: md5Str})
 	return md5Str
 }
 
@@ -87,8 +86,8 @@ func genCreateSql(def *TabDef) string {
 	return fmt.Sprintf("create table if not exists `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8;", def.Name, strings.Join(fsl, ",\n"))
 }
 
-func checkField(db *sql.DB, def *TabDef, md5 string) {
-	rows, err := db.Query(fmt.Sprintf("desc %s;", def.Name))
+func checkField(group *Group, def *TabDef, md5 string) {
+	rows, err := group.db.Query(fmt.Sprintf("desc %s;", def.Name))
 	ifExit(err)
 	fmap := make(map[string]bool)
 	for rows.Next() {
@@ -116,7 +115,7 @@ func checkField(db *sql.DB, def *TabDef, md5 string) {
 	}
 	if len(add) > 0 {
 		sqlAdd := fmt.Sprintf("ALTER TABLE `%s` %s;", def.Name, strings.Join(add, ","))
-		_, err = db.Exec(sqlAdd)
+		_, err = group.db.Exec(sqlAdd)
 		ifExit(err)
 	}
 	if len(fmap) > 0 {
@@ -125,24 +124,22 @@ func checkField(db *sql.DB, def *TabDef, md5 string) {
 			del = append(del, fmt.Sprintf("DROP `%s`", fn))
 		}
 		sqlDel := fmt.Sprintf("ALTER TABLE `%s` %s;", def.Name, strings.Join(del, ","))
-		_, err = db.Exec(sqlDel)
+		_, err = group.db.Exec(sqlDel)
 		ifExit(err)
 	}
-	SyncUpdate("db_version", 1, &dbVersion{TabName: def.Name, Version: md5})
+	group.SyncUpdate("db_version", 1, &dbVersion{TabName: def.Name, Version: md5})
 
 }
 
 func getFileDef(f *reflect.Value, fieldName string) string {
 	var fs string
 	switch f.Kind() {
-	case reflect.Bool:
-		fs = fmt.Sprintf("`%s` INT( 11 ) NOT NULL", fieldName)
-	case reflect.Ptr,reflect.Slice,reflect.Map,reflect.Struct:
-		fs = fmt.Sprintf("`%s` mediumblob", fieldName)
-	case reflect.Int,reflect.Uint,reflect.Int32:
+	case reflect.Bool,reflect.Int,reflect.Uint,reflect.Int32:
 		fs = fmt.Sprintf("`%s` INT( 11 ) NOT NULL", fieldName)
 	case reflect.Int64,reflect.Uint64:
 		fs = fmt.Sprintf("`%s` BIGINT( 23 ) NOT NULL", fieldName)
+	case reflect.Ptr,reflect.Slice,reflect.Map,reflect.Struct:
+		fs = fmt.Sprintf("`%s` mediumblob", fieldName)
 	case reflect.String:
 		fs = fmt.Sprintf("`%s` VARCHAR( 250 ) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL", fieldName)
 	default:
@@ -163,8 +160,8 @@ func tabMd5(src interface{}) string {
 	if rt.Kind() == reflect.Ptr {
 		rt = rt.Elem()
 	}
-	var sl []string
 	n := rt.NumField()
+	sl := make([]string,0,n)
 	for i := 0; i < n; i++ {
 		t := rt.Field(i)
 		sl = append(sl, t.Name)

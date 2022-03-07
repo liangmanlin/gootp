@@ -2,20 +2,20 @@ package httpc
 
 import (
 	"fmt"
-	"github.com/liangmanlin/gootp/kernel"
 	"net/url"
 	"strings"
 )
 
-func Get(url string, param map[string]interface{}, timeOut int32, urlEncode bool) (body []byte, ok bool) {
-	return get(url, param, timeOut, urlEncode, false)
+func Get(url string, param map[string]interface{}, urlEncode bool,args...interface{}) (body []byte, ok bool) {
+	return get(url, param, urlEncode, args...)
 }
 
-func GetSSL(url string, param map[string]interface{}, timeOut int32, urlEncode bool) (body []byte, ok bool) {
-	return get(url, param, timeOut, urlEncode, true)
+func GetSSL(url string, param map[string]interface{}, urlEncode bool,args...interface{}) (body []byte, ok bool) {
+	args = append(args,WithSSL())
+	return get(url, param, urlEncode, args...)
 }
 
-func get(url string, param map[string]interface{}, timeOut int32, urlEncode bool, ssl bool) (body []byte, ok bool) {
+func get(url string, param map[string]interface{},urlEncode bool, args ...interface{}) (body []byte, ok bool) {
 	if len(param) > 0 {
 		paramStr := linkParam(param, urlEncode)
 		if strings.Index(url, "?") >= 0 {
@@ -24,23 +24,21 @@ func get(url string, param map[string]interface{}, timeOut int32, urlEncode bool
 			url += "?" + paramStr
 		}
 	}
-	return request(server, "GET", url, "", "", timeOut, ssl)
+	return Request(server, "GET", url, args...)
 }
 
-func Post(url, data, contentType string, timeOut int32) (body []byte, ok bool) {
-	return post(url, data, contentType, timeOut, false)
+func Post(url, data, contentType string,args ...interface{}) (body []byte, ok bool) {
+	return post(url, data, contentType,args...)
 }
 
-func PostSSL(url, data, contentType string, timeOut int32) (body []byte, ok bool) {
-	return post(url, data, contentType, timeOut, true)
+func PostSSL(url, data, contentType string,args ...interface{}) (body []byte, ok bool) {
+	args = append(args,WithSSL())
+	return post(url, data, contentType,args...)
 }
 
-func post(url, data, contentType string, timeOut int32, ssl bool) (body []byte, ok bool) {
-	return request(server, "POST", url, data, contentType, timeOut, ssl)
-}
-
-func Request(pid *kernel.Pid, method, url, body, contentType string, timeOut int32, ssl bool) ([]byte, bool) {
-	return request(pid, method, url, body, contentType, timeOut, ssl)
+func post(url, data, contentType string,args ...interface{}) (body []byte, ok bool) {
+	args = append(args,WithBody(data),WithContentType(contentType))
+	return Request(server, "POST", url, args...)
 }
 
 func linkParam(param map[string]interface{}, urlEncode bool) string {
@@ -63,4 +61,25 @@ func encode(str string, need bool) string {
 		return url.QueryEscape(str)
 	}
 	return str
+}
+
+func WithSSL() useSSL {
+	return useSSL{}
+}
+
+func WithBody(bodyStr string) bodyType {
+	return bodyType(bodyStr)
+}
+
+func WithContentType(contentT string) contentType {
+	return contentType(contentT)
+}
+
+// timeout sec,default is 3s
+func WithTimeOut(t int32) timeOut {
+	return timeOut(t)
+}
+
+func WithHeader(key,value string) header {
+	return header{key: key,value: value}
 }

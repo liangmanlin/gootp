@@ -31,7 +31,7 @@ func Encode(v interface{}) string {
 }
 
 func quote(bin []byte)string{
-	sl := make([]byte,1,1)
+	sl := make([]byte,1,len(bin)+2)
 	sl[0] = '\''
 	//sl = append(sl,bin...)
 	for _,b := range bin{

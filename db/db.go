@@ -8,15 +8,16 @@ import (
 	"log"
 )
 
-var GameDB *sql.DB
-var LogDB *sql.DB
+var groups []*Group
 
-func Start(DBConfig Config,defSlice []*TabDef, gameDB string,logDB string) {
+func Start(idx int,DBConfig Config,defSlice []*TabDef, dbName string,syncNum int,mode Mode) *Group {
+	g := newGroup(idx)
+	g.mode = mode
 	Env.dbConfig = DBConfig
-	initDef(defSlice)
-	cn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8",DBConfig.User,DBConfig.PWD,DBConfig.Host,DBConfig.Port, gameDB) // 主库
+	initDef(g,defSlice)
+	cn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8",DBConfig.User,DBConfig.PWD,DBConfig.Host,DBConfig.Port, dbName)
 	db,err := sql.Open("mysql",cn)
-	GameDB = db
+	g.db = db
 	if err != nil {
 		log.Panic(err)
 	}
@@ -25,19 +26,29 @@ func Start(DBConfig Config,defSlice []*TabDef, gameDB string,logDB string) {
 		log.Panic(err)
 	}
 	rows.Close()
-	db.SetMaxOpenConns(Env.ConnNum)
-	db.SetMaxIdleConns(Env.ConnNum)
-	startSync(db)
-	// 检查数据库表版本号
-	tableCheck(db)
-	kernel.ErrorLog("db app start on database: %s",gameDB)
-	// 连接日志库
-	if logDB != "" {
-		cnLog := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8",DBConfig.User,DBConfig.PWD,DBConfig.Host,DBConfig.Port,logDB) // 主库
-		dbLog,err2 := sql.Open("mysql",cnLog)
-		LogDB = dbLog
-		if err2 !=nil {
-			log.Panic(err2)
-		}
+	connNum := DBConfig.ConnNum
+	if connNum == 0 {
+		connNum = Env.ConnNum
 	}
+	db.SetMaxOpenConns(connNum)
+	db.SetMaxIdleConns(connNum)
+	startSync(g,syncNum)
+	// 检查数据库表版本号
+	tableCheck(g)
+	kernel.ErrorLog("db start on database: %s",dbName)
+	return g
+}
+
+func newGroup(idx int) *Group {
+	if cap(groups) <= idx{
+		groups = append(groups,&Group{})
+	}
+	if groups[idx].db != nil{
+		log.Panicf("duplicate db idx:%d",idx)
+	}
+	return groups[idx]
+}
+
+func GetGroup(idx int) *Group {
+	return groups[idx]
 }

@@ -9,7 +9,11 @@ const gateSupName = "gate_sup"
 
 var addrMap = make(map[string]string)
 
-func Start(name string, handler *kernel.Actor, port int, opt ...interface{}) {
+func Start(name string, handler *kernel.Actor, port int, opt ...optFun) {
+	start(name,handler,port,opt)
+}
+
+func start(name string, handler *kernel.Actor, port int, opt []optFun)  {
 	ensureSupStart()
 	a := &app{name: name,handler: handler,port: port,opt: opt}
 	kernel.AppStart(a)

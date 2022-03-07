@@ -2,6 +2,7 @@ package node
 
 import (
 	"github.com/liangmanlin/gootp/kernel"
+	"runtime/debug"
 )
 
 var callBack = make(map[string]*func(interface{})interface{})
@@ -37,7 +38,12 @@ func RpcRegister(fun string,function RpcFunc)  {
 }
 
 func callFunc(fun string, argStruct interface{}) interface{} {
-	defer kernel.Catch()
+	defer func() {
+		p := recover()
+		if p != nil {
+			kernel.ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
+		}
+	}()
 	if f,ok:= callBack[fun];ok{
 		return (*f)(argStruct)
 	}

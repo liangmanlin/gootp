@@ -33,7 +33,9 @@ func (a *app)Start(bootType kernel.AppBootType) *kernel.Pid {
 }
 
 func (a *app)Stop(stopType kernel.AppStopType)  {
-	kernel.ErrorLog("gate %s stopped",a.name)
+	listenerName := fmt.Sprintf("gate_listener_%s", a.name)
+	kernel.CallName(listenerName,stopType)
+	kernel.ErrorLog("gate %s stop",a.name)
 }
 
 func (a *app)SetEnv(key string,value interface{})  {

@@ -7,11 +7,12 @@ import (
 type NodeEnv struct {
 	cookie   string
 	nodeName string
-	PingTick int64 // 毫秒
-	Port     int //可以指定一个端口，而不是随机
+	PingTick int64 `command:"ping_tick"`// 毫秒
+	Port     int `command:"node_port"` //可以指定一个端口，而不是随机
 }
 
-type ping int32
+type ping struct {}
+type pong struct {}
 
 type call struct {
 	callID int64
@@ -51,8 +52,9 @@ const (
 	M_TYPE_CALL_NAME
 	M_TYPE_CAST_KMSG
 	M_TYPE_CAST_NAME_KMSG
+	M_TYPE_PONG
 )
 
 type app struct {
-
+	register bool
 }

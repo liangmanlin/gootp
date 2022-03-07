@@ -2,23 +2,24 @@ package kernel
 
 import (
 	"fmt"
+	"github.com/liangmanlin/gootp/bpool"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
-	"unsafe"
 )
 
 const loggerName = "logger"
 
 var loggerServerPid *Pid = nil
 
-type makeFile int
+type makeFile struct{}
 
 type loggerState struct {
-	file *os.File
+	out      io.Writer
+	redirect bool
 }
 
 type LogLevel int
@@ -26,55 +27,66 @@ type LogLevel int
 var logLevel LogLevel = 2
 
 type logData struct {
+	pkg    string
 	module string
 	line   int
 	log    string
 }
 
-var logWriter io.Writer
+func SetLogLevel(lv LogLevel) {
+	logLevel = lv
+}
 
-func Touch(writer io.Writer) {
-	Env.LogPath = ""
-	logWriter = writer
+func SetLoggerOut(writer io.Writer) {
+	Cast(loggerServerPid, writer)
 }
 
 func DebugLog(format string, args ...interface{}) {
 	if logLevel < 2 {
+		var pkg string
 		_, file, line, ok := runtime.Caller(1)
 		if !ok {
 			file = "???"
+			pkg = "???"
 			line = 0
 		} else {
-			file = filepath.Base(file)
+			pkg, file = filepath.Split(file)
+			pkg = filepath.Base(pkg)
 		}
-		sendLog(file, line, format, args...)
+		sendLog(pkg, file, line, format, args...)
 	}
 }
 
 func ErrorLog(format string, args ...interface{}) {
 	_, file, line, ok := runtime.Caller(1)
+	var pkg string
 	if !ok {
 		file = "???"
+		pkg = "???"
 		line = 0
 	} else {
-		file = filepath.Base(file)
+		pkg, file = filepath.Split(file)
+		pkg = filepath.Base(pkg)
 	}
-	sendLog(file, line, format, args...)
+	sendLog(pkg, file, line, format, args...)
 }
 
-func UnHandleMsg(msg interface{})  {
+func UnHandleMsg(msg interface{}) {
+	var pkg string
 	_, file, line, ok := runtime.Caller(1)
 	if !ok {
 		file = "???"
+		pkg = "???"
 		line = 0
 	} else {
-		file = filepath.Base(file)
+		pkg, file = filepath.Split(file)
+		pkg = filepath.Base(pkg)
 	}
-	sendLog(file, line, "un handle msg : %#v", msg)
+	sendLog(pkg, file, line, "un handle msg : %#v", msg)
 }
 
 func startLogger() {
-	StartName(loggerName, loggerActor)
+	StartNameOpt(loggerName, loggerActor, ActorOpt(ActorChanCacheSize(10000)))
 }
 
 type logWrite struct {
@@ -82,46 +94,53 @@ type logWrite struct {
 }
 
 func (l *logWrite) Write(p []byte) (n int, err error) {
-	Cast(l.logger, p)
 	n = len(p)
+	// 考虑到上层逻辑可能会重用，这里copy
+	Cast(l.logger, bpool.NewBuf(p))
 	return
 }
 
+func LoggerWriter() io.Writer {
+	return &logWrite{logger: loggerServerPid}
+}
+
 var loggerActor = &Actor{
-	Init: func(context *Context, pid *Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *Context, pid *Pid, args ...interface{}) interface{} {
 		ErrorLog("%s %s started", loggerName, pid)
-		loggerServerPid = pid
 		addToKernelMap(pid)
 		startLogTimer(pid)
 		// 捕获go内置log信息
 		log.SetOutput(&logWrite{logger: pid})
-		state := initFile(&loggerState{file: nil})
-		if Env.LogPath != "" && (*loggerState)(state).file == nil {
+		state := initFile(&loggerState{out: nil})
+		if Env.LogPath != "" && (*loggerState)(state).out == nil {
 			os.Exit(789)
 		}
+		loggerServerPid = pid
 		return state
 	},
 	HandleCast: func(context *Context, msg interface{}) {
-		state := (*loggerState)(context.State)
+		state := context.State.(*loggerState)
 		switch m := msg.(type) {
 		case *logData:
-			if state.file != nil {
-				writeLog(state.file, m)
-			} else if logWriter != nil {
-				writeLog(logWriter, m)
+			if state.out != nil {
+				writeLog(state.out, m)
 			}
-		case []byte:
-			if state.file != nil {
-				_, _ = state.file.Write(m)
-			} else if logWriter != nil {
-				_, _ = logWriter.Write(m)
+		case *bpool.Buff:
+			if state.out != nil {
+				_, _ = state.out.Write(m.ToBytes())
 			}
 			if Env.WriteLogStd {
-				_, _ = os.Stdout.Write(m)
+				_, _ = os.Stdout.Write(m.ToBytes())
 			}
+			m.Free()
+		case io.Writer:
+			state.out = m
+			state.redirect = true
 		case makeFile:
-			context.State = initFile(state)
-			startLogTimer(context.Self())
+			if !state.redirect {
+				context.State = initFile(state)
+				startLogTimer(context.Self())
+			}
 		}
 	},
 	HandleCall: func(context *Context, request interface{}) interface{} {
@@ -135,12 +154,12 @@ var loggerActor = &Actor{
 	},
 }
 
-func initFile(logger *loggerState) unsafe.Pointer {
-	if logger.file != nil {
-		_ = logger.file.Close()
+func initFile(logger *loggerState) *loggerState {
+	if logger.out != nil {
+		logger.out.(*os.File).Close()
 	}
-	logger.file = makeLogFile()
-	return unsafe.Pointer(logger)
+	logger.out = defaultWriter()
+	return logger
 }
 
 func startLogTimer(self *Pid) {
@@ -148,20 +167,18 @@ func startLogTimer(self *Pid) {
 	t := time.Now()
 	_, min, sec := t.Clock()
 	less := hourMillisecond - (int64(min)*minMillisecond + int64(sec)*Millisecond)
-	SendAfter(TimerTypeOnce, self, less, makeFile(1))
+	SendAfter(TimerTypeOnce, self, less, makeFile{})
 }
 
-func sendLog(module string, line int, format string, args ...interface{}) () {
-	msg := &logData{module: module, line: line, log: fmt.Sprintf(format,args...)}
+func sendLog(pkg, module string, line int, format string, args ...interface{}) () {
+	msg := &logData{pkg: pkg, module: module, line: line, log: fmt.Sprintf(format, args...)}
 	if loggerServerPid != nil {
 		Cast(loggerServerPid, msg)
 	} else if Env.LogPath != "" {
-		// if the logger not start yet,write to the file native
-		file := makeLogFile()
-		writeLog(file, msg)
-		file.Close()
-	} else if logWriter != nil {
-		writeLog(logWriter, msg)
+		// if the logger not Start yet,write to the file native
+		logger := defaultWriter()
+		defer logger.Close()
+		writeLog(logger, msg)
 	}
 	if Env.WriteLogStd {
 		writeLog(os.Stdout, msg)
@@ -172,11 +189,11 @@ func writeLog(w io.Writer, data *logData) {
 	t := time.Now()
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
-	_, _ = fmt.Fprintf(w, "\n%d-%d-%d %d:%02d:%02d [%s:%d] %s\n",
-		year, month, day, hour, min, sec, data.module, data.line,data.log)
+	_, _ = fmt.Fprintf(w, "\n%d-%d-%d %d:%02d:%02d [%s.%s:%d] %s\n",
+		year, month, day, hour, min, sec, data.pkg, data.module, data.line, data.log)
 }
 
-func makeLogFile() *os.File {
+func defaultWriter() *os.File {
 	if Env.LogPath == "" {
 		return nil
 	}

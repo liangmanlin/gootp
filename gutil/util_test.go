@@ -3,7 +3,6 @@ package gutil
 import (
 	"sort"
 	"testing"
-	"unsafe"
 )
 
 type rangeConfig struct {
@@ -36,44 +35,35 @@ func BenchmarkSliceDelInt32(b *testing.B) {
 	}
 }
 
-func TestSort(t *testing.T) {
-	il := []int32{5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
-		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
-		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
-		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
-	}
-	Sort(il, func(data unsafe.Pointer, i, j int) bool {
-		l := *(*[]int32)(data)
-		return l[i] >= l[j]
-	}, func(data unsafe.Pointer, i, j int) {
-		l := *(*[]int32)(data)
-		l[i], l[j] = l[j], l[i]
-	})
-	t.Logf("%v", il)
-}
-
 func BenchmarkSortInt32(b *testing.B) {
 	l := []int32{5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 	}
-	cmp := func(data unsafe.Pointer, i, j int) bool {
-		l := *(*[]int32)(data)
-		return l[i] >= l[j]
-	}
-	swap := func(data unsafe.Pointer, i, j int) {
-		l := *(*[]int32)(data)
-		l[i], l[j] = l[j], l[i]
+	f := func(i,j int) bool {
+		return l[i]<l[j]
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Sort(l, cmp, swap)
+		sort.Slice(l,f)
 	}
 }
 
 func BenchmarkSort(b *testing.B) {
 	l := []int{5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
+		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,
 		5, 4, 2, 1, 7, 8, 9, 10, 11, 100, 3,

@@ -1,8 +1,10 @@
 # Golang/OTP
 
-## go actor framework & go simple otp
+## 提供`actor`模型编程思路
 
-### `kernel`提供`application` `supervisor` `gen_server`类似的行为
+## go simple otp
+
+### `kernel`提供`supervisor` `gen_server`类似的行为
 
 ### `node`提供多节点功能
 
@@ -10,34 +12,6 @@
 
 - 目前暂时没有支持windows的想法
 
-### 一个简单的例子
+### 更多的功能更新请自行查阅
 
-```golang
-
-import (
-  "github.com/liangmanlin/gootp/kernel"
-  "unsafe"
-)
-
-func main(){
-  kernel.KernelStart(func(){
-    actor := kernel.DefaultActor()
-    actor.Init = func(ctx *kernel.Context,pid *kernel.Pid,args ...interface{})unsafe.Pointer{
-      kernel.SendAfter(kernel.TimerTypeForever,pid,2000,true)
-      return nil
-    }
-    actor.HandleCast = func(ctx *kernel.Context,msg interface{}){
-      switch msg.(type) {
-      case bool:
-        kernel.ErrorLog("loop")
-      }
-    }
-    kernel.Start(actor)
-  },nil)
-}
-
-```
-
-### 完整使用例子 [go-game-server](https://github.com/liangmanlin/go-game-server)
-
-## 更多详情请查阅 [WIKI](https://github.com/liangmanlin/gootp/wiki)
+## 传送门 [WIKI](https://github.com/liangmanlin/gootp/-/wikis/home)

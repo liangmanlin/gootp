@@ -1,10 +1,10 @@
 package kernel
 
 import (
-	"fmt"
+	"container/list"
+	"errors"
 	"runtime/debug"
 	"sync"
-	"unsafe"
 )
 
 var _appMaps sync.Map
@@ -12,21 +12,25 @@ var _appPid2Name sync.Map
 
 var appPid *Pid
 
-var AppErrAlreadyStarted = fmt.Errorf("app already started ")
-var AppStartErr = fmt.Errorf("error ")
-var AppErrNotStart = fmt.Errorf("app not start ")
+var ErrAppAlreadyStarted = errors.New("app already started ")
+var ErrAppStart = errors.New("app start catch error ")
+var ErrAppNotStart = errors.New("app not Start ")
+
+type app struct {
+	l *list.List
+}
 
 func AppStart(app Application) (err error) {
 	var ok bool
 	defer func() {
 		if !ok {
-			err = AppStartErr
+			err = ErrAppStart
 			p := recover()
 			ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
 		}
 	}()
 	if AppInfo(app.Name()) != nil {
-		return AppErrAlreadyStarted
+		return ErrAppAlreadyStarted
 	}
 	pid := app.Start(APP_BOOT_TYPE_START)
 	ai := &appInfo{app: app, pid: pid}
@@ -34,22 +38,22 @@ func AppStart(app Application) (err error) {
 	_appPid2Name.Store(pid.id, app.Name())
 	ok = true
 	Cast(appPid, ai)
-	return nil
+	return
 }
 
 func AppStop(name string) {
-	Call(appPid, name)
+	CallTimeOut(appPid, name, 20)
 }
 
-func AppRestart(name string)(err error) {
+func AppRestart(name string) (err error) {
 	app := AppInfo(name)
 	if app == nil {
-		return AppErrNotStart
+		return ErrAppNotStart
 	}
 	var ok bool
 	defer func() {
 		if !ok {
-			err = AppStartErr
+			err = ErrAppStart
 			p := recover()
 			ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
 		}
@@ -61,29 +65,33 @@ func AppRestart(name string)(err error) {
 
 func AppInfo(name string) Application {
 	if app, ok := _appMaps.Load(name); ok {
-		return app.(appInfo).app
+		return app.(*appInfo).app
 	}
 	return nil
 }
 
 var appSvr = &Actor{
-	Init: func(ctx *Context, pid *Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(ctx *Context, pid *Pid, args ...interface{}) interface{} {
 		ErrorLog("application %s started", pid)
 		addToKernelMap(pid)
 		appPid = pid
-		return nil
+		state := app{
+			l: list.New(),
+		}
+		return &state
 	},
 	HandleCast: func(ctx *Context, msg interface{}) {
 		switch m := msg.(type) {
 		case *appInfo:
+			m.e =ctx.State.(*app).l.PushFront(m.app.Name())
 			Link(ctx.self, m.pid)
 		case *PidExit:
 			if appName, ok := _appPid2Name.Load(m.Pid.id); ok {
-				ai, _ := _appMaps.Load(appName)
-				aInf := ai.(*appInfo)
-				aInf.app.Stop(APP_STOP_TYPE_NORMAL)
 				_appPid2Name.Delete(m.Pid.id)
-				_appMaps.Delete(appName)
+				if ai, ok := _appMaps.Load(appName); ok {
+					ctx.State.(*app).l.Remove(ai.(*appInfo).e)
+					_appMaps.Delete(appName)
+				}
 			}
 		}
 
@@ -93,9 +101,18 @@ var appSvr = &Actor{
 		case string: // stop
 			if ai, ok := _appMaps.Load(r); ok {
 				aInf := ai.(*appInfo)
-				SupStop(aInf.pid) // 这里不删除数据，等待PidExit消息处理
+				app_stop(aInf)
 			}
-
+		case *initStop:
+			l := ctx.State.(*app).l
+			for e := l.Front(); e != nil; e = e.Next() {
+				if ai, ok := _appMaps.Load(e.Value); ok {
+					aInf := ai.(*appInfo)
+					if aInf.pid.IsAlive() {
+						app_stop(aInf)
+					}
+				}
+			}
 		}
 		return
 	},
@@ -105,4 +122,9 @@ var appSvr = &Actor{
 	ErrorHandler: func(ctx *Context, err interface{}) bool {
 		return true
 	},
+}
+
+func app_stop(ai *appInfo) {
+	ai.app.Stop(APP_STOP_TYPE_NORMAL)
+	SupStop(ai.pid) // 这里不删除数据，等待PidExit消息处理
 }

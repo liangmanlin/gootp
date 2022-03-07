@@ -16,6 +16,13 @@ func (b *BMap) Insert(key int64, value interface{}) {
 	b.m[key] = e
 }
 
+func (b *BMap) Lookup(key int64) interface{} {
+	if e, ok := b.m[key]; ok {
+		return e.Value
+	}
+	return nil
+}
+
 func (b *BMap) Delete(key int64) {
 	if e, ok := b.m[key]; ok {
 		b.l.Remove(e)

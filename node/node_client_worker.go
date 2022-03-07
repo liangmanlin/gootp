@@ -1,32 +1,42 @@
 package node
 
 import (
-	"fmt"
 	"github.com/liangmanlin/gootp/gate"
 	"github.com/liangmanlin/gootp/gate/pb"
 	"github.com/liangmanlin/gootp/kernel"
 	"io"
+	"log"
 	"runtime/debug"
 	"time"
 )
 
-func recPacket(conn *gate.Conn, father *kernel.Pid) {
-	if err := conn.Conn.SetReadDeadline(time.Time{}); err != nil { // 规避超时
-		kernel.Cast(father, &gate.TcpError{Err: err})
+func recPacket(conn gate.Conn, father *kernel.Pid) {
+	if err := conn.SetReadDeadline(time.Time{}); err != nil { // 规避超时
+		kernel.Cast(father, &gate.TcpError{ErrType:gate.ErrDeadLine,Err: err})
 		return
+	}
+	// 节点连接毕竟少，这里考虑只使用原生库实现
+	var connNet *gate.ConnNet
+	var ok bool
+	if connNet,ok = conn.(*gate.ConnNet);!ok {
+		log.Panic("node not support other conn")
 	}
 	recv := true
 	for {
-		rec(conn,father,&recv)
+		rec(connNet,father,&recv)
 		if !recv {
-			goto end
+			break // close
 		}
 	}
-end:
 }
 
-func rec(conn *gate.Conn,father *kernel.Pid,recv *bool) {
-	defer kernel.Catch()
+func rec(conn *gate.ConnNet,father *kernel.Pid,recv *bool) {
+	defer func() {
+		p := recover()
+		if p != nil {
+			kernel.ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
+		}
+	}()
 	c := conn.Conn
 	head := conn.GetHead()
 	headBuf := make([]byte, head)
@@ -35,7 +45,7 @@ func rec(conn *gate.Conn,father *kernel.Pid,recv *bool) {
 	for {
 		_, err := io.ReadAtLeast(c, headBuf, head)
 		if err != nil {
-			kernel.Cast(father, &gate.TcpError{Err: err})
+			kernel.Cast(father, &gate.TcpError{ErrType:gate.ErrReadErr,Err: err})
 			*recv = false
 			return
 		}
@@ -48,7 +58,7 @@ func rec(conn *gate.Conn,father *kernel.Pid,recv *bool) {
 			}
 			_, err = io.ReadAtLeast(c, pack, packSize)
 			if err != nil {
-				kernel.Cast(father, &gate.TcpError{Err: err})
+				kernel.Cast(father, &gate.TcpError{ErrType:gate.ErrReadErr,Err: err})
 				kernel.ErrorLog("%#v",err)
 				*recv = false
 				return
@@ -61,7 +71,7 @@ func rec(conn *gate.Conn,father *kernel.Pid,recv *bool) {
 func router(pack []byte, father *kernel.Pid) {
 	switch pack[0] {
 	case M_TYPE_PING: // ping
-		kernel.Cast(father, ping(1))
+		kernel.Cast(father, ping{})
 	case M_TYPE_CAST: //目标消息
 		index, pid := kernel.DecodePid(pack, 1)
 		if pid != nil {
@@ -121,6 +131,8 @@ func router(pack []byte, father *kernel.Pid) {
 			_, msg := coder.Decode(pack[index:])
 			kernel.Cast(pid, &kernel.KMsg{ModID: modID,Msg: msg})
 		}
+	case M_TYPE_PONG:
+		kernel.Cast(father, pong{})
 	}
 }
 
@@ -128,12 +140,4 @@ func replyNil(callID int64,father *kernel.Pid)  {
 	buf := []byte{0,0,0,9,3,0,0,0,0,0,0,0,0}
 	pb.WriteInt64(buf, callID, 5)
 	kernel.Cast(father,buf)
-}
-
-func catch(father *kernel.Pid) {
-	err := recover()
-	if err != nil {
-		kernel.ErrorLog("catch error reason: %s,Stack: %s", err, debug.Stack())
-	}
-	kernel.Cast(father, &gate.TcpError{Err: fmt.Errorf("catch error")})
 }

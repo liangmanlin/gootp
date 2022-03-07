@@ -8,6 +8,38 @@ import (
 	"unsafe"
 )
 
+var defaultR = Rand{rand.New(rand.NewSource(time.Now().UnixNano()))}
+
+func Random(min, max int32) int32 {
+	return defaultR.Random(min,max)
+}
+
+func Int32(n int32) int32 {
+	return defaultR.Int32(n)
+}
+
+func Int64(n int64) int64 {
+	return defaultR.Int64(n)
+}
+
+// 给定一个范围，随机若干个数
+func RandomNum(min, max, num int32) []int32 {
+	return defaultR.RandomNum(min,max,num)
+}
+
+/*
+从一个slice里面，根据权重，随机出value
+
+可以重复的参数比不可重复效率略高
+
+list := []struct{int32,interface{}}
+
+切记不要修改返回值里面的内容
+*/
+func RandomQSlice(list interface{}, num int32, canRepeated bool) interface{} {
+	return defaultR.RandomQSlice(list,num,canRepeated)
+}
+
 func New() Rand {
 	return Rand{rand.New(rand.NewSource(time.Now().UnixNano()))}
 }

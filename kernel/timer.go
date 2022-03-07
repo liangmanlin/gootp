@@ -3,7 +3,6 @@ package kernel
 import (
 	"fmt"
 	"time"
-	"unsafe"
 )
 
 type timerType int
@@ -20,24 +19,21 @@ const (
 	hourMillisecond       = 60 * minMillisecond
 )
 
-var rc = make(chan *actorTimer, 1000)
+var defaultRC = make(TimerChan, 1000)
 
-var timerServerMap = make(map[int64]*Pid)
-
-var secM, tenM, minM, hourM int64
+type TimerChan chan *actorTimer
 
 func initTimer() {
-	secM = Millisecond / Env.timerMinTick
-	tenM = tenMillisecond / Env.timerMinTick
-	minM = minMillisecond / Env.timerMinTick
-	hourM = hourMillisecond / Env.timerMinTick
-	for i := 1; i <= Env.TimerProcNum; i++ {
-		name := fmt.Sprintf("timer_%d", i)
-		_, pid := SupStartChild("kernel", &SupChild{Name: name, Svr: timerActor, InitArgs: []interface{}{i}})
-		timerServerMap[pid.id] = pid
+	timerStartGroup("system",defaultRC,Env.TimerProcNum,Env.timerMinTick)
+}
+
+func timerStartGroup(GName string,rc TimerChan,procNum int,minTick int64)  {
+	for i := 1; i <= procNum; i++ {
+		name := fmt.Sprintf(GName+"_"+"timer_%d", i)
+		_, pid := SupStartChild("kernel", &SupChild{Name: name, Svr: timerActor, InitArgs: []interface{}{i,rc,minTick}})
 		addToKernelMap(pid)
 	}
-	ErrorLog("timer service started,min tick: %dms", Env.timerMinTick)
+	ErrorLog("timer [%s] service started,min tick: %dms",GName, minTick)
 }
 
 type timerList struct {
@@ -54,14 +50,21 @@ type actorTimer struct {
 	msg       interface{}
 }
 
-func SendAfter(timerType timerType, pid *Pid, inv int64, msg interface{}) {
-	ti := &actorTimer{timerType: timerType, inv: inv, pid: pid, msg: msg, d: Now2() + inv}
-	rc <- ti
+func SendAfterForever(pid *Pid, inv int64, msg interface{})  {
+	SendAfter(TimerTypeForever,pid,inv,msg)
 }
 
-// 目前只提供最小精度为100ms的定时器
+func SendAfter(timerType timerType, pid *Pid, inv int64, msg interface{}) {
+	defaultRC.SendAfter(timerType,pid,inv,msg)
+}
+
+func (r TimerChan)SendAfter(timerType timerType, pid *Pid, inv int64, msg interface{})  {
+	ti := &actorTimer{timerType: timerType, inv: inv, pid: pid, msg: msg, d: Now2() + inv}
+	r <- ti
+}
 
 type aTimer struct {
+	secM, tenM, minM, hourM int64
 	tick int64
 	t0   *timerList // 少于1秒
 	t1   *timerList // 少于10秒
@@ -71,8 +74,14 @@ type aTimer struct {
 }
 
 var timerActor = &Actor{
-	Init: func(context *Context,self *Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *Context,self *Pid, args ...interface{}) interface{} {
 		t := aTimer{}
+		rc := args[1].(TimerChan)
+		timerMinTick := args[2].(int64)
+		t.secM = Millisecond / timerMinTick
+		t.tenM = tenMillisecond / timerMinTick
+		t.minM = minMillisecond / timerMinTick
+		t.hourM = hourMillisecond / timerMinTick
 		t.tick = 0
 		t.t0 = nil
 		t.t1 = nil
@@ -81,14 +90,14 @@ var timerActor = &Actor{
 		t.t4 = nil
 		go startReceiver(self, rc)
 		go tLoop(self,args[0].(int))
-		return unsafe.Pointer(&t)
+		return &t
 	},
 	HandleCast: func(context *Context, msg interface{}) {
-		t := (*aTimer)(context.State)
+		t := context.State.(*aTimer)
 		switch tm := msg.(type) {
 		case *actorTimer:
 			t.insertTimer(&timerList{pre: nil, next: nil, data: tm}, tm.inv)
-		case bool:
+		case Loop:
 			t.loopTimer()
 		}
 	},
@@ -108,16 +117,16 @@ func (t *aTimer) loopTimer() {
 	now := Now2()
 	t.t0 = t.loopTimerCheck(t.t0, now)
 	t.tick++
-	if t.tick%secM == 0 {
+	if t.tick%t.secM == 0 {
 		t.t1 = t.actTimer(t.t1, now, Millisecond)
 	}
-	if t.tick%tenM == 0 {
+	if t.tick%t.tenM == 0 {
 		t.t2 = t.actTimer(t.t2, now, tenMillisecond)
 	}
-	if t.tick%minM == 0 {
+	if t.tick%t.minM == 0 {
 		t.t3 = t.actTimer(t.t3, now, minMillisecond)
 	}
-	if t.tick == hourM {
+	if t.tick == t.hourM {
 		t.t4 = t.actTimer(t.t4, now, hourMillisecond)
 		t.tick = 0
 	}
@@ -195,7 +204,7 @@ func tLoop(father *Pid,i int) {
 	c := time.Tick(time.Duration(Env.timerMinTick) * time.Millisecond)
 	for {
 		<-c
-		Cast(father, true)
+		Cast(father, Loop{})
 	}
 }
 
@@ -217,4 +226,11 @@ func removeTimer(list **timerList, e *timerList) {
 			e.next.pre = e.pre
 		}
 	}
+}
+
+// 单独开启一个timer组
+func TimerStartHandler(GName string,minInv int64,handlerProcNum int,chanSize int) TimerChan {
+	c := make(TimerChan, chanSize)
+	timerStartGroup(GName,c,handlerProcNum,minInv)
+	return c
 }

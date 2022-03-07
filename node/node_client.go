@@ -2,17 +2,18 @@ package node
 
 import (
 	"fmt"
+	"github.com/liangmanlin/gootp/crypto"
 	"github.com/liangmanlin/gootp/gate"
 	"github.com/liangmanlin/gootp/gate/pb"
 	"github.com/liangmanlin/gootp/kernel"
-	"github.com/liangmanlin/gootp/kernel/crypto"
-	"unsafe"
+	"reflect"
 )
 
-var pingBuf = []byte{0, 0, 0, 1, 0}
+var pingBuf = []byte{0, 0, 0, 1, M_TYPE_PING}
+var pongBuf = []byte{0, 0, 0, 1, M_TYPE_PONG}
 
 type client struct {
-	conn           *gate.Conn
+	conn           gate.Conn
 	node           *kernel.Node
 	callID2Channel map[int64]chan interface{}
 	pingFail       int
@@ -20,14 +21,14 @@ type client struct {
 }
 
 var nodeClient = &kernel.Actor{
-	Init: func(context *kernel.Context, pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *kernel.Context, pid *kernel.Pid, args ...interface{}) interface{} {
 		c := client{}
-		c.conn = args[0].(*gate.Conn)
+		c.conn = args[0].(gate.Conn)
 		c.callID2Channel = make(map[int64]chan interface{})
-		return unsafe.Pointer(&c)
+		return &c
 	},
 	HandleCast: func(context *kernel.Context, msg interface{}) {
-		state := (*client)(context.State)
+		state := context.State.(*client)
 		buf := state.buf[0:0]
 		switch m := msg.(type) {
 		case *kernel.NodeMsg:
@@ -72,7 +73,7 @@ var nodeClient = &kernel.Actor{
 			if state.conn != nil {
 				buf = makeBuf(buf, 13, M_TYPE_CALL_RESULT)
 				pb.WriteInt64(buf, m.ID, 5)
-				if m.Result != nil {
+				if !reflect.ValueOf(m.Result).IsNil() {
 					buf = coder.EncodeBuff(m.Result, 0, buf)
 				}
 				gate.WriteSize(buf, 4, len(buf)-4)
@@ -80,7 +81,7 @@ var nodeClient = &kernel.Actor{
 			}
 		case *call:
 			if ch, ok := state.callID2Channel[m.callID]; ok {
-				defer kernel.CatchNoPrint() // channel maybe closed
+				defer func() {recover()}() // channel maybe closed
 				delete(state.callID2Channel, m.callID)
 				ch <- &kernel.CallResult{ID: m.callID, Result: m.reply}
 			}
@@ -90,7 +91,7 @@ var nodeClient = &kernel.Actor{
 				case *kernel.KMsg:
 					const size = 11
 					buf = makeBuf(buf, size, M_TYPE_CAST_NAME_KMSG)
-					pb.WriteIn32(buf,tm.ModID,5)
+					pb.WriteIn32(buf, tm.ModID, 5)
 					buf = pb.WriteString(buf, m.Dest, 9)
 					buf = coder.EncodeBuff(tm.Msg, 0, buf)
 				default:
@@ -111,10 +112,13 @@ var nodeClient = &kernel.Actor{
 		case ping:
 			// ping
 			state.pingFail = 0
+			state.conn.SendBufHead(pongBuf)
+		case pong:
+			state.pingFail = 0
 		case int:
 			if state.pingFail >= 2 {
 				// 断开连接
-				kernel.ErrorLog("Node ping fail")
+				kernel.ErrorLog("Node %s ping fail", context.Name())
 				context.Exit("normal")
 				break
 			}
@@ -127,7 +131,7 @@ var nodeClient = &kernel.Actor{
 		state.buf = buf
 	},
 	HandleCall: func(context *kernel.Context, request interface{}) interface{} {
-		state := (*client)(context.State)
+		state := context.State.(*client)
 		switch request.(type) {
 		case bool:
 			return startWorkerConnect(state, context)
@@ -135,7 +139,7 @@ var nodeClient = &kernel.Actor{
 		return nil
 	},
 	Terminate: func(context *kernel.Context, reason *kernel.Terminate) {
-		state := (*client)(context.State)
+		state := context.State.(*client)
 		if state.conn != nil {
 			state.conn.Close()
 		}
@@ -154,7 +158,7 @@ var nodeClient = &kernel.Actor{
 
 func startWorker(state *client, context *kernel.Context) {
 	state.conn.SetHead(4)
-	err, buf := state.conn.Recv(0, 0)
+	buf, err := state.conn.Recv(0, 0)
 	if err != nil {
 		context.Exit("normal")
 		return
@@ -176,7 +180,7 @@ func startWorker(state *client, context *kernel.Context) {
 
 		buf = coder.Encode(&ConnectSucc{Name: Env.nodeName, Self: context.Self()}, 4)
 		state.conn.SendBufHead(buf)
-		kernel.SendAfter(kernel.TimerTypeForever, context.Self(), Env.PingTick, 1)
+		kernel.SendAfterForever(context.Self(), Env.PingTick, 1)
 		// 启动接收进程
 		go recPacket(state.conn, context.Self())
 	}
@@ -189,7 +193,7 @@ func startWorkerConnect(state *client, context *kernel.Context) bool {
 	info := &Connect{Time: time, Sign: sign, Name: Env.nodeName, DestName: context.Name()}
 	buf := coder.Encode(info, 4)
 	state.conn.SendBufHead(buf)
-	err, buf := state.conn.Recv(0, 0)
+	buf, err := state.conn.Recv(0, 0)
 	if err != nil {
 		context.Exit("normal")
 		return false
@@ -201,7 +205,7 @@ func startWorkerConnect(state *client, context *kernel.Context) bool {
 		state.node = kernel.GetNode(m.Name)
 		kernel.SetNodeNetWork(state.node, context.Self())
 		kernel.Cast(monitorPid, &NodeOP{Name: m.Name, OP: OPConnect})
-		kernel.SendAfter(kernel.TimerTypeForever, context.Self(), Env.PingTick, 1)
+		kernel.SendAfterForever(context.Self(), Env.PingTick, 1)
 		// 启动接收进程
 		go recPacket(state.conn, context.Self())
 		return true
@@ -227,13 +231,7 @@ func makeBuf(buf []byte, size int, v byte) []byte {
 		buf[4] = v
 	} else {
 		buf = buf[0:size]
-		for i := 0; i < size; i++ {
-			if i == 4 {
-				buf[i] = v
-			} else {
-				buf[i] = 0
-			}
-		}
+		buf[4] = v
 	}
 	return buf
 }

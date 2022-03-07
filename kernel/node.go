@@ -68,7 +68,7 @@ func Nodes() []*Node {
 		if n, ok := nodeId2Node.Load(key); ok {
 			rs = append(rs, n.(*Node))
 		}
-		return false
+		return true
 	})
 	return rs
 }

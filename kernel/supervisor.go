@@ -3,7 +3,6 @@ package kernel
 import (
 	"fmt"
 	"github.com/liangmanlin/gootp/kernel/kct"
-	"unsafe"
 )
 
 type op uint
@@ -22,6 +21,7 @@ type SupChild struct {
 	ReStart   bool
 	Name      string
 	Svr       *Actor
+	InitOpt   []interface{}
 	InitArgs  []interface{}
 }
 
@@ -45,7 +45,7 @@ func SupStartChild(sup interface{}, child *SupChild) (interface{}, *Pid) {
 	return fmt.Errorf("unknow arg:%#v", sup), nil
 }
 
-func SupStart(name string, initChild []*SupChild) *Pid {
+func SupStart(name string, initChild ...*SupChild) *Pid {
 	pid, _ := StartName(name, supervisorActor, name, initChild)
 	return pid
 }
@@ -65,17 +65,20 @@ func SupStop(sup interface{}) {
 
 func SupWhichChild(sup interface{}) []*SupChildInfo {
 	var pid *Pid
-	switch sup.(type) {
+	switch t := sup.(type) {
 	case string:
-		pid = WhereIs(sup.(string))
+		pid = WhereIs(t)
 	case *Pid:
-		pid = sup.(*Pid)
+		pid = t
 	}
 	if pid == nil {
 		return nil
 	}
 	_, rs := Call(pid, opWhichChild)
-	return rs.([]*SupChildInfo)
+	if t, ok := rs.([]*SupChildInfo); ok {
+		return t
+	}
+	return nil
 }
 
 func startChild(supPid *Pid, child *SupChild) (interface{}, *Pid) {
@@ -98,7 +101,7 @@ func init() {
 		HandleCast: supHandleCast,
 		HandleCall: supHandleCall,
 		Terminate: func(context *Context, reason *Terminate) {
-			(*supervisor)(context.State).stopAllChild(context)
+			context.State.(*supervisor).stopAllChild(context)
 		},
 		ErrorHandler: func(context *Context, err interface{}) bool {
 			return true
@@ -106,7 +109,7 @@ func init() {
 	}
 }
 
-func supInit(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
+func supInit(context *Context, pid *Pid, args ...interface{}) interface{} {
 	s := supervisor{}
 	s.name = args[0].(string)
 	ErrorLog("%s sup %s started", s.name, pid)
@@ -115,14 +118,14 @@ func supInit(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
 	s.cache = make(map[int64]*SupChildInfo, 1000)
 	for _, child := range s.initChild {
 		opt := buildOpt(child, pid)
-		childPid, _ := start(child.Svr, opt, child.InitArgs...)
+		childPid, _ := StartOpt(child.Svr, opt, child.InitArgs...)
 		s.addChild(&SupChildInfo{child, childPid})
 	}
-	return unsafe.Pointer(&s)
+	return &s
 }
 
 func supHandleCast(context *Context, msg interface{}) {
-	s := (*supervisor)(context.State)
+	s := context.State.(*supervisor)
 	switch m := msg.(type) {
 	case *PidExit:
 		if m.Reason.Reason != ExitReasonNormal {
@@ -139,16 +142,18 @@ func supHandleCast(context *Context, msg interface{}) {
 }
 
 func supHandleCall(context *Context, request interface{}) interface{} {
-	s := (*supervisor)(context.State)
+	s := context.State.(*supervisor)
 	switch r := request.(type) {
-	case *SupChild: //start a new service
+	case *SupChild: //StartOpt a new service
 		return s.startChild(context, r)
 	case op:
 		return s.callOP(r)
 	case stop:
+		ErrorLog("%s stop", context.name)
 		reason := string(r)
 		s.stopAllChild(context)
 		context.Exit(reason)
+		return nil
 	}
 	return fmt.Errorf("no case match")
 }
@@ -165,16 +170,16 @@ func (s *supervisor) startChild(context *Context, child *SupChild) interface{} {
 	var err interface{}
 	if child.ChildType == SupChildTypeWorker {
 		if child.Name != "" {
-			pid, err = context.StartNameLink(child.Name, child.Svr, child.InitArgs...)
+			pid, err = context.StartLinkOpt(child.Svr, append(child.InitOpt, regName(child.Name)), child.InitArgs...)
 		} else {
-			pid, err = context.StartLink(child.Svr, child.InitArgs...)
+			pid, err = context.StartLinkOpt(child.Svr, child.InitOpt, child.InitArgs...)
 		}
 	} else if child.ChildType == SupChildTypeSup {
 		var sc []*SupChild
 		for _, c := range child.InitArgs {
 			sc = append(sc, c.(*SupChild))
 		}
-		pid = SupStart(child.Name, sc)
+		pid = SupStart(child.Name, sc...)
 	}
 	s.addChild(&SupChildInfo{child, pid})
 	if err != nil {
@@ -199,9 +204,9 @@ func (s *supervisor) stopAllChild(context *Context) {
 		child := s.cache[e.(int64)].Pid
 		if child.IsAlive() {
 			callID := makeCallID()
-			iStop := &initStop{callID: callID, recCh: context.self.call}
+			iStop := &initStop{callID: callID, recCh: context.self.callResult}
 			Cast(child, &actorOP{iStop})
-			context.recResult(callID, context.self.call, 100)
+			context.recResult(callID, context.self.callResult, 100)
 		}
 	}
 	s.child.Foreach(f)
@@ -222,8 +227,7 @@ func (s *supervisor) callOP(op op) interface{} {
 }
 
 func buildOpt(child *SupChild, father *Pid) []interface{} {
-	var opt []interface{}
-	opt = append(opt, &link{pid: father})
+	opt := append(child.InitOpt, &link{pid: father})
 	if child.Name != "" {
 		opt = append(opt, regName(child.Name))
 	}

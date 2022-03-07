@@ -5,12 +5,14 @@ import (
 	"sync/atomic"
 )
 
+var deadPid = &Pid{isAlive: 0}
+
 type Pid struct {
-	isAlive int32 // 放在第一个位置，有利于cpu快速定位
-	id      int64
-	c       chan interface{}
-	call    chan interface{}
-	node    *Node // 添加分布式支持
+	isAlive    int32 // 放在第一个位置，有利于cpu快速定位
+	id         int64
+	c          chan interface{}
+	callResult chan interface{}
+	node       *Node // 添加分布式支持
 }
 
 func (p *Pid) GetChannel() chan interface{} {
@@ -47,6 +49,10 @@ func (p *Pid) Node() *Node {
 	return p.node
 }
 
+func (p *Pid)Cast(msg interface{})  {
+	Cast(p,msg)
+}
+
 func (p *Pid) ToBytes(buf []byte) []byte {
 	v := p.id
 	buf = append(buf, uint8(v>>56), uint8(v>>48), uint8(v>>40), uint8(v>>32), uint8(v>>24), uint8(v>>16), uint8(v>>8), uint8(v))
@@ -60,11 +66,6 @@ func (p *Pid) ToBytes(buf []byte) []byte {
 	buf = append(buf, uint8(lens>>8), uint8(lens))
 	buf = append(buf, nodeName...)
 	return buf
-}
-
-// 进程退出时调用，使得判断进程是否存活不需要获取一个全局锁
-func (p *Pid) exit() {
-	atomic.StoreInt32(&p.isAlive, 0)
 }
 
 func DecodePid(buf []byte, index int) (int, *Pid) {
@@ -83,8 +84,15 @@ func DecodePid(buf []byte, index int) (int, *Pid) {
 		if pid, ok := kernelAliveMap.Load(id); ok {
 			return end, pid.(*Pid)
 		}
-		return end, nil
+		return end, deadPid
 	}
 	n := GetNode(nodeName)
 	return end, &Pid{id: id, c: nil, node: n}
+}
+
+func LocalPid(id int64) *Pid {
+	if pid, ok := kernelAliveMap.Load(id); ok {
+		return pid.(*Pid)
+	}
+	return nil
 }

@@ -2,33 +2,29 @@ package node
 
 import (
 	"github.com/liangmanlin/gootp/kernel"
-	"unsafe"
 )
 
-var rpcSvr = &kernel.Actor{
-	Init: func(context *kernel.Context,pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+var rpcSvr = kernel.NewActor(
+	kernel.InitFunc(func(ctx *kernel.Context, pid *kernel.Pid, args ...interface{}) interface{} {
+		ctx.ChangeCallMode()
 		return nil
-	},
-	HandleCast: func(context *kernel.Context, msg interface{}) {
+	}),
+	kernel.HandleCallFunc(func(context *kernel.Context, request interface{}) interface{} {
+		go rpcHandleCall(request.(*kernel.CallInfo))
+		return nil
+	}))
 
-	},
-	HandleCall: func(context *kernel.Context, request interface{}) interface{} {
-		switch r := request.(type) {
-		case *RpcCallArgs:
-			var args interface{}
-			if len(r.Args) > 0 {
-				_,args = coder.Decode(r.Args)
-			}else{
-				args = nil
-			}
-			return callFunc(r.Fun, args)
+func rpcHandleCall(call *kernel.CallInfo) {
+	var result interface{}
+	switch r := call.Request.(type) {
+	case *RpcCallArgs:
+		var args interface{}
+		if len(r.Args) > 0 {
+			_, args = coder.Decode(r.Args)
+		} else {
+			args = nil
 		}
-		return nil
-	},
-	Terminate: func(context *kernel.Context, reason *kernel.Terminate) {
-
-	},
-	ErrorHandler: func(context *kernel.Context, err interface{}) bool {
-		return true
-	},
+		result = callFunc(r.Fun, args)
+	}
+	kernel.Reply(call.RecCh,call.CallID,result)
 }

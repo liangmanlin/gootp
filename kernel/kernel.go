@@ -1,11 +1,11 @@
 package kernel
 
 import (
+	"github.com/liangmanlin/gootp/args"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sync"
-	"unsafe"
 )
 
 const (
@@ -20,19 +20,19 @@ var kernelPid = make(map[int64]*Pid)
 var kernelAliveMap sync.Map
 
 func KernelStart(start func(), stop func()) {
-	StartName(initServerName, initActor)
+	StartNameOpt(initServerName, initActor,ActorOpt(ActorChanCacheSize(10000)))
 	kernelChild := []*SupChild{
-		{Name: selfServerName, Svr: selfSenderActor,ReStart: true},
-		{Name: "application", Svr: appSvr,ReStart: true},
+		{Name: selfServerName, Svr: selfSenderActor, ReStart: true,InitOpt: ActorOpt(ActorChanCacheSize(10000))},
+		{Name: "application", Svr: appSvr, ReStart: true},
 	}
-	kernel := SupStart("kernel", kernelChild)
+	kernel := SupStart("kernel", kernelChild...)
 	addToKernelMap(kernel)
 	initTimer()
 	startLogger()
 	if stop != nil {
 		Call(initServerPid, stopFunc(stop))
 	}
-	ErrorLog("kernel start complete")
+	ErrorLog("kernel Start OTP complete")
 	start()
 	// block the main goroutine
 	<-mainCh
@@ -60,23 +60,26 @@ func MakeArgs(args ...interface{}) []interface{} {
 	return args
 }
 
-func Catch() {
-	p := recover()
-	if p != nil {
-		ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
-	}
-}
-
-func CatchNoPrint() {
-	recover()
-}
-
 func CatchFun(f func()) {
-	defer Catch()
+	defer func() {
+		p := recover()
+		if p != nil {
+			ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
+		}
+	}()
 	f()
 }
 
 func init() {
+	// 支持命令行参数
+	args.FillEvn(Env)
+	if v, ok := args.GetInt("timer_min_tick"); ok {
+		Env.SetTimerMinTick(int64(v))
+	}
+	if v, ok := args.GetInt("log_level"); ok {
+		logLevel = LogLevel(v)
+	}
+	DebugLog("env :%#v",Env)
 }
 
 var mainRoot string
@@ -95,7 +98,7 @@ func GetMainRoot() string {
 // 纯粹方便测试用，不用每次编写一堆相同代码
 func DefaultActor() *Actor {
 	actor := &Actor{
-		Init: func(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
+		Init: func(context *Context, pid *Pid, args ...interface{}) interface{} {
 			return nil
 		},
 		HandleCast: func(context *Context, msg interface{}) {
@@ -112,6 +115,26 @@ func DefaultActor() *Actor {
 	return actor
 }
 
-func Link(srcPid,destPid *Pid)  {
-	Cast(destPid,&actorOP{op: &link{pid: srcPid}})
+func Link(srcPid, destPid *Pid) {
+	Cast(destPid, &actorOP{op: &link{pid: srcPid}})
+}
+
+// 减少代码规模，但是不应该用在需要高性能的地方
+func NewActor(funList ...interface{}) *Actor {
+	actor := DefaultActor()
+	for _, f := range funList {
+		switch fun := f.(type) {
+		case InitFunc:
+			actor.Init = fun
+		case HandleCastFunc:
+			actor.HandleCast = fun
+		case HandleCallFunc:
+			actor.HandleCall = fun
+		case TerminateFunc:
+			actor.Terminate = fun
+		case ErrorHandleFunc:
+			actor.ErrorHandler = fun
+		}
+	}
+	return actor
 }

@@ -5,19 +5,17 @@ import (
 	"github.com/liangmanlin/gootp/kernel"
 	"io/ioutil"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 func StartWorker(father *kernel.Pid) *kernel.Pid {
-	pid,_ := kernel.Start(workerActor,father)
+	pid, _ := kernel.Start(workerActor, father)
 	return pid
 }
 
 var workerActor = &kernel.Actor{
-	Init: func(ctx *kernel.Context, pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(ctx *kernel.Context, pid *kernel.Pid, args ...interface{}) interface{} {
 		tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 		var father *kernel.Pid
 		if args[0] != nil {
@@ -25,32 +23,37 @@ var workerActor = &kernel.Actor{
 			ctx.Link(father)
 		}
 		state := worker{
-			father: father,
-			client: &http.Client{},
-			sslClient:&http.Client{Transport: tr},
+			father:    father,
+			client:    &http.Client{},
+			sslClient: &http.Client{Transport: tr},
 		}
-		return unsafe.Pointer(&state)
+		return &state
 	},
 	HandleCast: func(ctx *kernel.Context, msg interface{}) {
-		state := (*worker)(ctx.State)
-		switch m:=msg.(type) {
+		state := ctx.State.(*worker)
+		switch m := msg.(type) {
 		case *requestData:
 			if atomic.LoadInt32(&m.close) == 0 {
 				client := state.client
 				if m.ssl {
 					client = state.sslClient
 				}
-				client.Timeout = 3*time.Second
-				if m.method == "GET" {
-					rsp, err := client.Get(m.url)
-					responseFunc(rsp,err,m)
-				}else if m.method == "POST" {
-					if m.contentType == "" {
-						m.contentType = "application/json"
-					}
-					rsp, err := client.Post(m.url,m.contentType,strings.NewReader(m.body))
-					responseFunc(rsp,err,m)
+				client.Timeout = time.Duration(m.timeOut) * time.Second
+				req, err := http.NewRequest(m.method, m.url, nil)
+				if err != nil {
+					kernel.ErrorLog("new request error:%s",err)
+					responseFunc(nil, err, m)
+					return
 				}
+				if m.method == "POST"{
+					if m.contentType == "" {
+						m.contentType = "application/ejson"
+					}
+					req.Header.Set("Content-Type",m.contentType)
+				}
+				addHeader(req,m)
+				rsp, err := client.Do(req)
+				responseFunc(rsp, err, m)
 			}
 			if state.father != nil {
 				kernel.Cast(state.father, ctx.Self())
@@ -68,17 +71,24 @@ var workerActor = &kernel.Actor{
 	},
 }
 
-func responseFunc(rsp *http.Response,err error,m *requestData)  {
+func responseFunc(rsp *http.Response, err error, m *requestData) {
 	if err != nil {
-		kernel.ErrorLog("httpc %s err:%#v",m.url,err)
-		m.ch <- response{ok: false,rsp: nil}
-	}else {
+		kernel.ErrorLog("httpc %s err:%#v", m.url, err)
+		m.ch <- response{ok: false, rsp: nil}
+	} else {
 		defer rsp.Body.Close()
 		if rsp.StatusCode == 200 {
 			body, _ := ioutil.ReadAll(rsp.Body)
 			m.ch <- response{ok: true, rsp: body}
-		}else{
+		} else {
+			kernel.ErrorLog("httpc %s rsp code:%d",m.url,rsp.StatusCode)
 			m.ch <- response{ok: false, rsp: nil}
 		}
+	}
+}
+
+func addHeader(req *http.Request,m *requestData)  {
+	for _,v := range m.headers{
+		req.Header.Set(v.key,v.value)
 	}
 }

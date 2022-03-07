@@ -14,7 +14,7 @@ type initResult struct {
 var actorID int64 = 0
 var callIndex int64 = 1
 
-func makeID() int64 {
+func makePid() int64 {
 start:
 	id := atomic.AddInt64(&actorID, 1)
 	// 损失一点点性能，判断重复
@@ -35,13 +35,22 @@ type CallResult struct {
 	Result interface{}
 }
 
+func ActorOpt(opt ...interface{}) []interface{} {
+	return opt
+}
+
 func Start(newActor *Actor, args ...interface{}) (*Pid, interface{}) {
-	return start(newActor, nil, args...)
+	return StartOpt(newActor, nil, args...)
 }
 
 func StartName(name string, newActor *Actor, args ...interface{}) (*Pid, interface{}) {
 	opt := []interface{}{regName(name)}
-	return start(newActor, opt, args...)
+	return StartOpt(newActor, opt, args...)
+}
+
+func StartNameOpt(name string, newActor *Actor, opt []interface{}, args ...interface{}) (*Pid, interface{}) {
+	opt = append(opt, regName(name))
+	return StartOpt(newActor, opt, args...)
 }
 
 func CastNameNode(name string, node interface{}, msg interface{}) {
@@ -59,10 +68,10 @@ func CastNameNode(name string, node interface{}, msg interface{}) {
 		CastName(name, msg)
 		return
 	}
-	defer CatchNoPrint()
-	if p, ok := nodeNetWork.Load(dn.id); ok {
+	defer func() {recover()}()
+	if p, ok := GetNodeNetWork(dn); ok {
 		m := &NodeMsgName{Dest: name, Msg: msg}
-		p.(*Pid).c <- m
+		p.c <- m
 	}
 }
 
@@ -74,11 +83,11 @@ func CastName(name string, msg interface{}) {
 
 func Cast(pid *Pid, msg interface{}) {
 	// 浪费一点性能，使得发送不会因为对端退出而阻塞，或者panic
-	defer CatchNoPrint()
+	defer func() {recover()}()
 	if pid.node != nil {
-		if p, ok := nodeNetWork.Load(pid.node.id); ok {
+		if p, ok := GetNodeNetWork(pid.node); ok {
 			m := &NodeMsg{Dest: pid, Msg: msg}
-			p.(*Pid).c <- m
+			p.c <- m
 		}
 		return
 	}
@@ -93,10 +102,46 @@ func CallName(name string, request interface{}) (bool, interface{}) {
 	if pid := WhereIs(name); pid != nil {
 		return CallTimeOut(pid, request, 5)
 	}
-	return false, nil
+	return false, &CallError{ErrType: CallErrorTypeNoProc}
 }
 
 func CallNameNode(name string, node interface{}, request interface{}) (bool, interface{}) {
+	c := make(chan interface{})
+	return callNameNode(name,node,request,c,true,recResult)
+}
+
+func CallTimeOut(pid *Pid, request interface{}, timeOut time.Duration) (bool, interface{}) {
+	c := make(chan interface{})
+	return callTimeOut(pid, request, timeOut, c,true, recResult)
+}
+
+func callTimeOut(pid *Pid, request interface{}, timeOut time.Duration, rc chan interface{},closeRC bool,
+	recvFun func(int64, chan interface{}, time.Duration) (bool, interface{})) (bool, interface{}) {
+	// 浪费一点性能，使得发送不会因为对端退出而阻塞，或者panic
+	defer func() {recover()}()
+	if closeRC {
+		defer close(rc)
+	}
+	callID := makeCallID()
+	if pid.node != nil {
+		// 其他节点，需要构造额外信息
+		if p, ok := GetNodeNetWork(pid.node); ok {
+			ci := &NodeCall{Dest: pid, Req: request, CallID: callID, Ch: rc}
+			p.c <- ci
+			ok, result := recvFun(callID, rc, timeOut)
+			return ok, result
+		}
+		return false, &CallError{ErrType: CallErrorTypeNodeNotConnect}
+	} else {
+		ci := &CallInfo{RecCh: rc, CallID: callID, Request: request}
+		pid.c <- ci
+		ok, result := recvFun(callID, rc, timeOut)
+		return ok, result
+	}
+}
+
+func callNameNode(name string, node interface{}, request interface{},rc chan interface{},closeRC bool,
+	recvFun func(int64, chan interface{}, time.Duration) (bool, interface{})) (bool, interface{}) {
 	var dn *Node
 	switch n := node.(type) {
 	case string:
@@ -108,60 +153,40 @@ func CallNameNode(name string, node interface{}, request interface{}) (bool, int
 		return false, nil
 	}
 	if dn.Equal(SelfNode()) {
-		return CallName(name, request)
-	}
-	defer CatchNoPrint()
-
-	if p, ok := nodeNetWork.Load(dn.id); ok {
-		c := make(chan interface{})
-		defer close(c)
-		callID := makeCallID()
-		ci := &NodeCallName{Dest: name, Req: request, CallID: callID, Ch: c}
-		p.(*Pid).c <- ci
-		ok, result := recResult(callID, c, 5)
-		return ok, result
-	}
-	return false, nil
-}
-
-func CallTimeOut(pid *Pid, request interface{}, timeOut time.Duration) (bool, interface{}) {
-	// 浪费一点性能，是的发送不会因为对端退出而阻塞，或者panic
-	defer CatchNoPrint()
-	c := make(chan interface{})
-	defer close(c)
-	callID := makeCallID()
-	if pid.node != nil {
-		// 其他节点，需要构造额外信息
-		if p, ok := nodeNetWork.Load(pid.node.id); ok {
-			ci := &NodeCall{Dest: pid, Req: request, CallID: callID, Ch: c}
-			p.(*Pid).c <- ci
-			ok, result := recResult(callID, c, timeOut)
-			return ok, result
+		if pid := WhereIs(name); pid != nil {
+			return callTimeOut(pid, request, 5,rc,closeRC,recvFun)
 		}
-		return false, nil
-	} else {
-		ci := &CallInfo{RecCh: c, CallID: callID, Request: request}
-		pid.c <- ci
-		ok, result := recResult(callID, c, timeOut)
+		return false, &CallError{ErrType: CallErrorTypeNoProc}
+	}
+	defer func() {recover()}()
+	if closeRC {
+		defer close(rc)
+	}
+	if p, ok := GetNodeNetWork(dn); ok {
+		callID := makeCallID()
+		ci := &NodeCallName{Dest: name, Req: request, CallID: callID, Ch: rc}
+		p.c <- ci
+		ok, result := recvFun(callID, rc, 5)
 		return ok, result
 	}
+	return false, &CallError{ErrType: CallErrorTypeNodeNotConnect}
 }
 
-func start(actor *Actor, opt []interface{}, args ...interface{}) (*Pid, interface{}) {
-	c := make(chan interface{}, Env.ActorChanCacheSize)
-	id := makeID()
-	pid := &Pid{0,id, c, make(chan interface{}, 1), nil}
+func StartOpt(actor *Actor, opt []interface{}, args ...interface{}) (*Pid, interface{}) {
+	c := make(chan interface{}, getCacheSize(opt))
+	id := makePid()
+	pid := &Pid{0, id, c, make(chan interface{}, 1), nil}
 	ok, err := startGO(pid, actor, opt, args...)
 	if ok {
 		return pid, nil
 	}
 	close(pid.c)
-	close(pid.call)
+	close(pid.callResult)
 	return nil, err
 }
 
 func startGO(pid *Pid, actor *Actor, opt []interface{}, args ...interface{}) (ok bool, err interface{}) {
-	context := &Context{self: pid, actor: actor}
+	context := &Context{self: pid, actor: actor,callMode: call_mode_normal}
 	defer func() {
 		if !ok {
 			err = recover()
@@ -172,15 +197,25 @@ func startGO(pid *Pid, actor *Actor, opt []interface{}, args ...interface{}) (ok
 	context.parseOP(opt) // 在init之前执行，仅仅是为了注册名字
 	// 向init注册启动
 	if initServerPid != nil {
-		context.links = append(context.links, initRegister(pid))
+		context.Link(initRegister(pid))
 	}
-	context.State = actor.Init(context,pid, args...)
+	context.State = actor.Init(context, pid, args...)
 	addAliveMap(pid)
-	pid.isAlive = 1 // 用于判断进程存活，可以快速判断，不需要全局锁
+	atomic.AddInt32(&pid.isAlive, 1) // 用于判断进程存活，可以快速判断，不需要全局锁
 	ok = true
 	go loop(pid, context)
 	// 修改为在同一个进程中执行初始化逻辑，减少启动进程的栈浪费，并且defer不会执行
 	return
+}
+
+func getCacheSize(opt []interface{}) int {
+	for _, op := range opt {
+		switch o := op.(type) {
+		case ActorChanCacheSize:
+			return int(o)
+		}
+	}
+	return Env.ActorChanCacheSize
 }
 
 func loop(pid *Pid, context *Context) {
@@ -194,53 +229,48 @@ func loop(pid *Pid, context *Context) {
 	}
 }
 
-func recMsg(pid *Pid, context *Context, stop **initStop) {
-	defer actorCatch(context, stop)
+func recMsg(pid *Pid, ctx *Context, stop **initStop) {
+	defer func() {
+		if err := recover(); err != nil {
+			ErrorLog("catch error Reason: %s,Stack: %s", err, debug.Stack())
+			if ctx.actor.ErrorHandler == nil || !ctx.actor.ErrorHandler(ctx, err) {
+				ctx.terminateReason = &Terminate{Reason: "error"}
+				*stop = &initStop{reply: false}
+			}
+		}
+	}()
 	var msg interface{}
 	for {
-		if context.msgQ != nil {
-			msg = context.msgQ.msg
-			context.msgQ = context.msgQ.next
+		if msg = ctx.msgQ.Pop(); msg != nil {
 		} else {
 		rec:
 			select {
 			case msg = <-pid.c:
-			case msg = <-pid.call: // 损失一些性能，防止call通道阻塞，导致对端阻塞
-				ErrorLog("un handle call Result:%#v", msg)
+			case msg = <-pid.callResult: // 损失一些性能，防止call通道阻塞，导致对端阻塞
+				ErrorLog("un handle callResult Result:%#v", msg)
 				goto rec
 			}
 		}
 		switch m := msg.(type) {
 		case *CallInfo:
-			context.handleCall(m)
+			ctx.handleCall(m)
 		case *actorOP:
-			code, reason := context.handleOP(m.op)
+			code, reason := ctx.handleOP(m.op)
 			switch code {
 			case actorCodeExit:
-				context.terminateReason = reason
-				*stop = &initStop{flag: false}
-				goto exit
+				ctx.terminateReason = reason
+				*stop = &initStop{reply: false}
+				return
 			case actorCodeInitStop:
-				context.terminateReason = reason
+				ctx.terminateReason = reason
 				t := m.op.(*initStop)
-				t.flag = true
+				t.reply = true
 				*stop = t
-				goto exit
+				return
 			default:
 			}
 		default:
-			context.actor.HandleCast(context, msg)
-		}
-	}
-exit:
-}
-
-func actorCatch(context *Context, stop **initStop) {
-	if err := recover(); err != nil {
-		ErrorLog("catch error Reason: %s,Stack: %s", err, debug.Stack())
-		if !context.actor.ErrorHandler(context, err) {
-			context.terminateReason = &Terminate{Reason: "error"}
-			*stop = &initStop{flag: false}
+			ctx.actor.HandleCast(ctx, msg)
 		}
 	}
 }
@@ -251,16 +281,16 @@ func exitFinal(context *Context, stop **initStop) {
 		if err != nil {
 			ErrorLog("catch error Reason: %s,Stack: %s", err, debug.Stack())
 		}
-		close(context.self.call) //之所以要关闭，是为了防止对端无辜阻塞
+		close(context.self.callResult) //之所以要关闭，是为了防止对端无辜阻塞
 		close(context.self.c)
 	}()
 	removeAliveMap(context.self)
-	context.self.exit()
-	p := recover()
+	context.self.SetDie()
 	var reason *Terminate
 	if context.terminateReason != nil {
 		reason = context.terminateReason
 	}
+	p := recover()
 	if p != nil {
 		ErrorLog("actor exit,Reason:%s,Stack:%s", p, debug.Stack())
 		reason = &Terminate{Reason: ExitReasonError}
@@ -271,29 +301,32 @@ func exitFinal(context *Context, stop **initStop) {
 			Cast(pid, msg)
 		}
 	}
-	CatchFun(func() { context.actor.Terminate(context, reason) })
+	if context.actor.Terminate != nil {
+		CatchFun(func() { context.actor.Terminate(context, reason) })
+	}
 	if context.name != "" {
 		UnRegister(context.name)
 	}
-	if *stop != nil && (*stop).flag {
-		reply((*stop).recCh, (*stop).callID, true)
+	if *stop != nil && (*stop).reply {
+		Reply((*stop).recCh, (*stop).callID, true)
 	}
 }
 
 func recResult(callID int64, c chan interface{}, timeOut time.Duration) (bool, interface{}) {
-	t := time.After(timeOut * time.Second)
+	t := time.NewTimer(timeOut * time.Second)
 rec:
 	select {
 	case result := <-c:
 		r := result.(*CallResult)
 		if r.ID == callID {
+			t.Stop()
 			return true, r.Result
 		}
-		ErrorLog("not match call ID,%d,%d", r.ID, callID)
+		ErrorLog("not match callResult ID,%d,%d", r.ID, callID)
 		goto rec
-	case <-t:
-		ErrorLog("rec call timeout")
-		return false, &CallError{1, nil}
+	case <-t.C:
+		ErrorLog("rec callResult timeout")
+		return false, &CallError{CallErrorTypeTimeOut, nil}
 	}
 }
 
@@ -301,8 +334,8 @@ func makeCallID() int64 {
 	return atomic.AddInt64(&callIndex, 1)
 }
 
-func reply(recCh chan interface{}, callID int64, result interface{}) {
-	defer CatchNoPrint() // 理论上可以预见问题
+func Reply(recCh chan interface{}, callID int64, result interface{}) {
+	defer func() {recover()}() // 理论上可以预见问题
 	r := &CallResult{callID, result}
 	recCh <- r
 }

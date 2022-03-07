@@ -3,29 +3,28 @@ package gate
 import (
 	"github.com/liangmanlin/gootp/kernel"
 	"net"
-	"unsafe"
 )
 
 type acceptor struct {
 	clientSup  *kernel.Pid
 	listener   net.Listener
 	handler    *kernel.Actor
-	clientArgs ClientArgs
+	clientArgs []interface{}
 }
 
 var acceptorActor = &kernel.Actor{
-	Init: func(context *kernel.Context,pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *kernel.Context, pid *kernel.Pid, args ...interface{}) interface{} {
 		a := acceptor{}
 		a.clientSup = args[0].(*kernel.Pid)
 		a.listener = args[1].(net.Listener)
 		a.handler = args[2].(*kernel.Actor)
-		a.clientArgs = args[3].(ClientArgs)
-		return unsafe.Pointer(&a)
+		a.clientArgs = args[3].([]interface{})
+		return &a
 	},
 	HandleCast: func(context *kernel.Context, msg interface{}) {
 		switch msg.(type) {
 		case bool:
-			(*acceptor)(context.State).accept(context)
+			context.State.(*acceptor).accept(context)
 		}
 	},
 	HandleCall: func(context *kernel.Context, request interface{}) interface{} {
@@ -54,7 +53,7 @@ func (a *acceptor) accept(context *kernel.Context) {
 		}
 		context.CastSelf(true)
 	} else {
-		if err.(*net.OpError).Op == "accept" {
+		if e, ok := err.(*net.OpError); ok && e.Op == "accept" {
 
 		} else {
 			kernel.ErrorLog("accept error: %s", err.Error())

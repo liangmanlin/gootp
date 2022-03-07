@@ -1,17 +1,11 @@
 package kernel
 
-import "unsafe"
-
 const selfServerName = "selfSender"
 
 var selfSenderPid *Pid
 
-func (c *Context) CastSelf(msg interface{}) {
-	Cast(selfSenderPid, &routerMsg{to: c.Self(), msg: msg})
-}
-
 var selfSenderActor = &Actor{
-	Init: func(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *Context,pid *Pid, args ...interface{}) interface{} {
 		ErrorLog("%s %s started", selfServerName, pid)
 		selfSenderPid = pid
 		addToKernelMap(pid)

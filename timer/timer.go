@@ -3,6 +3,7 @@ package timer
 import (
 	"github.com/liangmanlin/gootp/kernel"
 	"reflect"
+	"runtime/debug"
 	"unsafe"
 )
 
@@ -71,9 +72,17 @@ func (t *Timer) Loop(state interface{}, now2 int64) {
 }
 
 func actFun(state interface{}, f interface{}, arg []interface{}) {
-	defer kernel.Catch()
+	defer func() {
+		p := recover()
+		if p != nil {
+			kernel.ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
+		}
+	}()
 	// 浪费一些性能，使用反射执行
-	vf := reflect.ValueOf(f).Elem()
+	vf := reflect.ValueOf(f)
+	if vf.Kind() == reflect.Ptr{
+		vf = vf.Elem()
+	}
 	size := len(arg) + 1
 	in := make([]reflect.Value, size)
 	in[0] = reflect.ValueOf(state)

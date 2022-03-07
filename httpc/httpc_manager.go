@@ -1,11 +1,10 @@
 package httpc
 
 import (
-	"container/list"
 	"github.com/liangmanlin/gootp/kernel"
+	"github.com/liangmanlin/gootp/ringbuffer"
 	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 var server *kernel.Pid
@@ -13,18 +12,19 @@ var server *kernel.Pid
 var started = false
 
 var mangerActor = &kernel.Actor{
-	Init: func(ctx *kernel.Context, pid *kernel.Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(ctx *kernel.Context, pid *kernel.Pid, args ...interface{}) interface{} {
 		server = pid
-		state := manager{queue: list.New()}
+		state := manager{queue: ringbuffer.NewSingleRingBuffer(10, 100)}
 		workerPid := StartWorker(pid)
 		state.idle = []*kernel.Pid{workerPid}
 		state.poolSize = 1
 		state.maxPoolSize = 5
-		kernel.SendAfter(kernel.TimerTypeForever, pid, 5*1000, true)
-		return unsafe.Pointer(&state)
+		kernel.SendAfterForever(pid, 5*1000, kernel.Loop{})
+		kernel.ErrorLog("httpc_manager started :%s", pid)
+		return &state
 	},
 	HandleCast: func(ctx *kernel.Context, msg interface{}) {
-		state := (*manager)(ctx.State)
+		state := ctx.State.(*manager)
 		switch m := msg.(type) {
 		case *requestData:
 			size := len(state.idle)
@@ -33,17 +33,16 @@ var mangerActor = &kernel.Actor{
 				state.idle = state.idle[:size-1]
 				kernel.Cast(workerPid, m)
 			} else {
-				state.queue.PushBack(m)
+				state.queue.Put(m)
 			}
-		case bool:
-			if e := state.queue.Front(); e != nil && state.poolSize < state.maxPoolSize {
+		case kernel.Loop:
+			if state.queue.Size() > 0 && state.poolSize < state.maxPoolSize {
 				workerPid := StartWorker(ctx.Self())
 				ctx.CastSelf(workerPid)
 			}
 		case *kernel.Pid:
-			if e := state.queue.Front(); e != nil {
-				kernel.Cast(m, e.Value)
-				state.queue.Remove(e)
+			if req := state.queue.Pop();req !=nil {
+				kernel.Cast(m, req)
 			} else {
 				state.idle = append(state.idle, m)
 			}
@@ -55,7 +54,7 @@ var mangerActor = &kernel.Actor{
 	HandleCall: func(ctx *kernel.Context, request interface{}) interface{} {
 		switch r := request.(type) {
 		case maxPoolSize:
-			(*manager)(ctx.State).maxPoolSize = int32(r)
+			ctx.State.(*manager).maxPoolSize = int32(r)
 		}
 		return nil
 	},
@@ -90,12 +89,16 @@ func confirmStart() {
 	started = true
 }
 
-func request(pid *kernel.Pid,method, url, body, contentType string, timeOut int32, ssl bool) ([]byte, bool) {
+func Request(pid *kernel.Pid, method, url string, param ...interface{}) ([]byte, bool) {
 	confirmStart()
+	if pid == nil {
+		pid = server
+	}
 	recv := make(chan response, 1)
-	req := &requestData{method: method, url: url, body: body, contentType: contentType, ssl: ssl, ch: recv, close: 0}
+	req := &requestData{method: method, url: url, ch: recv, close: 0}
+	timeout := transParam(req, param)
 	kernel.Cast(pid, req)
-	t := time.After(time.Duration(timeOut) * time.Second)
+	t := time.After(time.Duration(timeout)*time.Second + 100*time.Millisecond)
 	defer close(recv)
 	select {
 	case r := <-recv:
@@ -104,6 +107,26 @@ func request(pid *kernel.Pid,method, url, body, contentType string, timeOut int3
 		atomic.AddInt32(&req.close, 1) // 给与worker判断是否丢弃
 		return nil, false
 	}
+}
+
+func transParam(req *requestData, param []interface{}) (timeout int32) {
+	timeout = 3
+	for _, v := range param {
+		switch t := v.(type) {
+		case useSSL:
+			req.ssl = true
+		case contentType:
+			req.contentType = string(t)
+		case bodyType:
+			req.body = string(t)
+		case timeOut:
+			timeout = int32(t)
+			req.timeOut = timeout
+		case header:
+			req.headers = append(req.headers, t)
+		}
+	}
+	return
 }
 
 func delPid(list []*kernel.Pid, pid *kernel.Pid) []*kernel.Pid {

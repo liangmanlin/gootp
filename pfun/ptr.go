@@ -33,10 +33,10 @@ func SliceSize(ptr unsafe.Pointer) int {
 	return *(*int)(unsafe.Pointer(uintptr(ptr) + CpuSize))                             // slice的size是第二个字段
 }
 
-func GetInt32(ptr unsafe.Pointer,inc uintptr) int32 {
-	return *(*int32)(unsafe.Pointer(uintptr(ptr)+inc))
+func GetInt32(ptr unsafe.Pointer,offset uintptr) int32 {
+	return *(*int32)(unsafe.Pointer(uintptr(ptr)+offset))
 }
 
-func GetInt64(ptr unsafe.Pointer,inc uintptr) int64 {
-	return *(*int64)(unsafe.Pointer(uintptr(ptr)+inc))
+func GetInt64(ptr unsafe.Pointer,offset uintptr) int64 {
+	return *(*int64)(unsafe.Pointer(uintptr(ptr)+offset))
 }

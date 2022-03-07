@@ -2,8 +2,6 @@ package db
 
 import "reflect"
 
-var dbTabDef map[string]*TabDef
-
 type TabDef struct {
 	Name       string
 	Pkey       []string
@@ -17,19 +15,27 @@ type dbVersion struct {
 	Version string
 }
 
-func initDef(defSlice []*TabDef) {
-	dbTabDef = make(map[string]*TabDef, 100)
+func initDef(g *Group,defSlice []*TabDef) {
+	g.dbTabDef = make(map[string]*TabDef, 100)
 	version := &TabDef{Name: "db_version", DataStruct: &dbVersion{}, Pkey: []string{"TabName"}}
 	version.buildMap()
-	dbTabDef["db_version"] = version
+	g.dbTabDef["db_version"] = version
 	for _, v := range defSlice {
 		v.buildMap()
-		dbTabDef[v.Name] = v
+		g.dbTabDef[v.Name] = v
 	}
 }
 
-func getDef(tab string) *TabDef {
-	return dbTabDef[tab]
+func (g *Group)GetDef(tab string) *TabDef {
+	return g.dbTabDef[tab]
+}
+
+func (g *Group)GetAllDef() []*TabDef {
+	l := make([]*TabDef,0,len(g.dbTabDef))
+	for _,v := range g.dbTabDef {
+		l = append(l,v)
+	}
+	return l
 }
 
 func (t *TabDef) buildMap() {

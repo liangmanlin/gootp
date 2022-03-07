@@ -12,7 +12,7 @@ func (a *app) Start(bootType kernel.AppBootType) *kernel.Pid {
 	_, supPid := kernel.SupStartChild("kernel", &kernel.SupChild{ChildType: kernel.SupChildTypeSup, Name: "NodeSup"})
 	kernel.SupStartChild(supPid, &kernel.SupChild{ChildType: kernel.SupChildTypeWorker, Name: "NodeMonitor", Svr: monitorActor, ReStart: true})
 	kernel.SupStartChild(supPid, &kernel.SupChild{ChildType: kernel.SupChildTypeWorker, Name: "RPC", Svr: rpcSvr, ReStart: true})
-	start(Env.nodeName)
+	start(Env.nodeName,a.register)
 	return supPid
 }
 

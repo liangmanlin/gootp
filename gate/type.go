@@ -1,14 +1,20 @@
 package gate
 
-import "github.com/liangmanlin/gootp/kernel"
+import (
+	"github.com/liangmanlin/gootp/kernel"
+	"net"
+)
+
+const (
+	ErrDeadLine = iota + 1
+	ErrReadErr
+	ErrClosed
+)
 
 type TcpError struct {
-	Err error
+	ErrType int
+	Err     error
 }
-
-type AcceptNum int
-
-type ClientArgs []interface{}
 
 type Pack struct {
 	ProtoID int
@@ -19,5 +25,17 @@ type app struct {
 	name    string
 	port    int
 	handler *kernel.Actor
-	opt     []interface{}
+	opt     []optFun
 }
+
+type Conn interface {
+	net.Conn
+	Send(buf []byte) (int, error)
+	SendBufHead(buf []byte) error
+	SetHead(head int)
+	GetHead() int
+	Recv(len int, timeOutMS int) ([]byte,error)
+	StartReader(dest *kernel.Pid)
+}
+
+type optFun func(*optStruct)

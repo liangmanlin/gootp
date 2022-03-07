@@ -7,10 +7,14 @@ import (
 )
 
 //保全全局名字
-var nameMap sync.Map
+var (
+	nameMap sync.Map
+	id2Name sync.Map
+)
 
 func Register(name string, pid *Pid) {
 	nameMap.Store(name, pid)
+	id2Name.Store(pid.id,name)
 	pid.c <- regName(name)
 }
 
@@ -20,7 +24,10 @@ func RegisterNotExist(name string, pid *Pid) {
 }
 
 func UnRegister(name string) {
-	nameMap.Delete(name)
+	if pid, ok := nameMap.Load(name); ok {
+		nameMap.Delete(name)
+		id2Name.Delete(pid.(*Pid).id)
+	}
 }
 
 func WhereIs(name string) *Pid {
@@ -31,9 +38,16 @@ func WhereIs(name string) *Pid {
 }
 
 func registerNotExist(name string, pid *Pid) {
-	p, ok := nameMap.Load(name)
-	if ok && p.(*Pid).IsAlive() {
+	if p, ok := nameMap.Load(name);ok && p.(*Pid).IsAlive() {
 		log.Panic(fmt.Errorf("Name :[%s] is register ", name))
 	}
 	nameMap.Store(name, pid)
+	id2Name.Store(pid.id,name)
+}
+
+func TryGetName(pid *Pid) string {
+	if n,ok := id2Name.Load(pid.id);ok{
+		return n.(string)
+	}
+	return ""
 }

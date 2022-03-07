@@ -96,7 +96,7 @@ func SliceInt32Member(value int32,arr []int32)bool{
 }
 
 // 根据一个范围，获取到值
-// list := []struct{int32,int32,interface{}}
+// list := []struct{{int32,int32,interface{}}}
 func FindRangeValue(list interface{}, value int32) interface{} {
 	vf := reflect.ValueOf(list)
 	if vf.Kind() != reflect.Slice {

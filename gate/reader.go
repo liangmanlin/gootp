@@ -1,62 +1,47 @@
 package gate
 
 import (
+	"github.com/liangmanlin/gootp/bpool"
 	"github.com/liangmanlin/gootp/kernel"
-	"go/types"
 	"io"
-	"sync/atomic"
+	"runtime/debug"
 	"time"
 )
 
-func startReader(dest *kernel.Pid, conn *Conn, decoder func([]byte) (int, interface{})) {
-	defer kernel.Catch() // catch the error
+func startReader(conn *ConnNet) {
+	defer func() {
+		p := recover()
+		if p != nil {
+			kernel.ErrorLog("catch error:%s,Stack:%s", p, debug.Stack())
+		}
+	}() // catch the error
 	c := conn.Conn
 	if err := c.SetReadDeadline(time.Time{}); err != nil { // 规避超时
-		kernel.Cast(dest, &TcpError{Err: err})
+		kernel.Cast(conn.handler, &TcpError{ErrType: ErrDeadLine, Err: err})
 		return
 	}
 	head := conn.head
 	headBuf := make([]byte, head)
-	var pack []byte
+	pack := bpool.New(100) // 先默认申请一个小的
 	var packSize int
 	for {
 		_, err := io.ReadAtLeast(c, headBuf, head)
 		if err != nil {
-			if len(conn.ctl) == 0 {
-				kernel.Cast(dest, &TcpError{Err: err})
-			}
-			goto end
+			kernel.Cast(conn.getHandler(), &TcpError{ErrType: ErrReadErr, Err: err})
+			break
 		}
 		packSize = ReadHead(head, headBuf)
 		if packSize > 0 {
-			if decoder == nil || cap(pack) < packSize { // todo 这里可以通过闭包提高性能
-				pack = make([]byte, packSize) // TODO 后续需要解决频繁申请内存的垃圾回收问题
-			}
-			_, err = io.ReadAtLeast(c, pack[:packSize], packSize)
+			pack = bpool.New(packSize)
+			_, err = pack.Read(c, packSize)
+			handler := conn.getHandler()
 			if err != nil {
-				kernel.Cast(dest, &TcpError{Err: err})
+				kernel.Cast(handler, &TcpError{ErrType: ErrReadErr, Err: err})
 				goto end
 			}
-			// 理论上有数据这个才有意义
-			if atomic.LoadInt32(&conn.ctlSize) > 0 {
-				if recCtl(conn, &head, &dest) != 0 {
-					goto end
-				}
-			}
-			if decoder != nil {
-				protoID, proto := decoder(pack)
-				kernel.Cast(dest, Pack{ProtoID: protoID, Proto: proto})
-			} else {
-				kernel.Cast(dest, pack)
-			}
+			kernel.Cast(handler, pack)
 		} else {
-			// 理论上有数据这个才有意义
-			if atomic.LoadInt32(&conn.ctlSize) > 0 {
-				if recCtl(conn, &head, &dest) != 0 {
-					goto end
-				}
-			}
-			kernel.Cast(dest, []byte{})
+			kernel.Cast(conn.getHandler(), []byte{})
 		}
 	}
 end:
@@ -70,32 +55,4 @@ func ReadHead(head int, buf []byte) (packSize int) {
 		packSize = (int(buf[0]) << 24) + (int(buf[1]) << 16) + (int(buf[2]) << 8) + int(buf[3])
 	}
 	return
-}
-
-func recCtl(conn *Conn, headPtr *int, destPtr **kernel.Pid) int {
-	atomic.AddInt32(&conn.ctlSize,-1)
-	ctl := <-conn.ctl
-	if handleCtl(conn, ctl, headPtr, destPtr)  == 1{
-		return 1
-	}
-	if atomic.LoadInt32(&conn.ctlSize) > 0 {
-		return recCtl(conn,headPtr,destPtr)
-	}
-	return 0
-}
-
-func handleCtl(conn *Conn, ctl interface{}, headPtr *int, destPtr **kernel.Pid) int {
-	if ctl == nil {
-		return 1
-	}
-	switch c := ctl.(type) {
-	case int:
-		return c
-	case *kernel.Pid:
-		*headPtr = conn.head
-		*destPtr = c
-	case types.Nil:
-		return 1
-	}
-	return 0
 }

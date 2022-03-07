@@ -2,6 +2,7 @@ package pb
 
 import (
 	"github.com/liangmanlin/gootp/kernel"
+	"log"
 	"reflect"
 	"unsafe"
 )
@@ -13,6 +14,9 @@ const cpuSize = unsafe.Sizeof(&_i) // 预先计算出int指针的大小
 func (c *Coder) EncodeBuff(proto interface{}, head int, buf []byte) (minBuf []byte) {
 	rt := getRType(proto)
 	def := c.getDefTF(rt)
+	if def == nil {
+		log.Panicf("proto :%s not define",rt.Name())
+	}
 	// 前期就可以计算出最小buff，减少多余的内存申请
 	sizeBuf := len(buf)
 	totalSize := def.minBufSize + head + 2 + sizeBuf
@@ -23,7 +27,7 @@ func (c *Coder) EncodeBuff(proto interface{}, head int, buf []byte) (minBuf []by
 		copy(minBuf, buf)
 	}
 	// 压入协议编号 大端
-	writeSize(minBuf[sizeBuf:], head, def.id)
+	WriteSize(minBuf[sizeBuf:], head, def.id)
 	ptr := *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(&proto)) + cpuSize)) // TODO 这里是根据interface 的内部实现写死的地址
 	minBuf = c.encodeDef(minBuf, ptr, rt, def)
 	if head > 0 {
@@ -37,10 +41,13 @@ func (c *Coder) EncodeBuff(proto interface{}, head int, buf []byte) (minBuf []by
 func (c *Coder) Encode(proto interface{}, head int) []byte {
 	rt := getRType(proto)
 	def := c.getDefTF(rt)
+	if def == nil {
+		log.Panicf("proto :%s not define",rt.Name())
+	}
 	// 前期就可以计算出最小buff，减少多余的内存申请
 	minBuf := make([]byte, 2+head, def.minBufSize+head+2)
 	// 压入协议编号 大端
-	writeSize(minBuf, head, def.id)
+	WriteSize(minBuf, head, def.id)
 	ptr := *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(&proto)) + cpuSize)) // TODO 这里是根据interface 的内部实现写死的地址
 	minBuf = c.encodeDef(minBuf, ptr, rt, def)
 	if head > 0 {
@@ -206,7 +213,7 @@ func (c *Coder) encodeSlice(buf []byte, ptr unsafe.Pointer, child reflect.Type) 
 	}
 	end := len(buf)
 	size := end - start
-	writeSize(buf, start-2, size)
+	WriteSize(buf, start-2, size)
 	return buf
 }
 
@@ -238,7 +245,7 @@ func (c *Coder) encodeMap(buf []byte, ptr unsafe.Pointer, child reflect.Type) []
 	}
 	end := len(buf)
 	size := end - start
-	writeSize(buf, start-2, size)
+	WriteSize(buf, start-2, size)
 	return buf
 }
 
@@ -268,7 +275,7 @@ func (c *Coder) getEncodeFunc(t reflect.Type) fieldEncodeFunc {
 	return c.enMap[kind]
 }
 
-func writeSize(buf []byte, index int, size int) {
+func WriteSize(buf []byte, index int, size int) {
 	buf[index] = uint8(size >> 8)
 	buf[index+1] = uint8(size)
 }

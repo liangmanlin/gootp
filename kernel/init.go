@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"github.com/liangmanlin/gootp/kernel/kct"
-	"unsafe"
 )
 
 const initServerName = "init"
@@ -19,11 +18,13 @@ func InitStop() {
 	if !isStop && stopCB != nil {
 		stopCB()
 	}
+	// 先停止各种app
+	CallTimeOut(appPid, &initStop{}, 600)
 	CallTimeOut(initServerPid, &initStop{}, 600)
 }
 
 type initStop struct {
-	flag   bool
+	reply  bool
 	callID int64
 	recCh  chan interface{}
 }
@@ -33,14 +34,14 @@ type initState struct {
 }
 
 var initActor = &Actor{
-	Init: func(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
+	Init: func(context *Context, pid *Pid, args ...interface{}) interface{} {
 		ErrorLog("%s %s started", initServerName, pid)
 		initServerPid = pid
 		addToKernelMap(pid)
-		return unsafe.Pointer(&initState{started: kct.NewBMap()})
+		return &initState{started: kct.NewBMap()}
 	},
 	HandleCast: func(context *Context, msg interface{}) {
-		state := (*initState)(context.State)
+		state := context.State.(*initState)
 		switch m := msg.(type) {
 		case *Pid:
 			state.started.Insert(m.id, m)
@@ -49,7 +50,7 @@ var initActor = &Actor{
 		}
 	},
 	HandleCall: func(context *Context, request interface{}) interface{} {
-		state := (*initState)(context.State)
+		state := context.State.(*initState)
 		switch r := request.(type) {
 		case *initStop:
 			if !isStop {
@@ -74,10 +75,10 @@ func initStopF(state *initState, context *Context) {
 		pid := e.(*Pid)
 		if _, ok := kernelPid[pid.id]; !ok && pid.IsAlive() {
 			callID := makeCallID()
-			iStop := &initStop{callID: callID, recCh: context.self.call}
+			iStop := &initStop{callID: callID, recCh: context.self.callResult}
 			Cast(pid, &actorOP{iStop})
 			for rl := true; rl; {
-				succ, rs := context.recResult(callID, context.self.call, 3)
+				succ, rs := context.recResult(callID, context.self.callResult, 3)
 				if succ {
 					rl = false
 				} else {
@@ -85,6 +86,9 @@ func initStopF(state *initState, context *Context) {
 					case *CallError:
 						// 应该只有数据库持久进程会超时
 						if r.ErrType == CallErrorTypeTimeOut && pid.IsAlive() {
+							if name := TryGetName(pid); name != "" {
+								ErrorLog("stop %s timeout", name)
+							}
 						} else {
 							rl = false
 						}
