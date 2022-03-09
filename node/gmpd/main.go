@@ -51,10 +51,10 @@ func handle(conn net.Conn)  {
 		if p,ok := nodeMap.Load(nodeName);ok{
 			port := p.(int)
 			buf = []byte{uint8(port >> 8),uint8(port)}
-			c.Write(buf)
+			c.Send(buf)
 		}else{
 			buf = []byte{0,0}
-			c.Write(buf)
+			c.Send(buf)
 		}
 	}
 }
