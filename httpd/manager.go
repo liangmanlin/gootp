@@ -25,7 +25,7 @@ var manager = &kernel.Actor{
 		max := 1 << bits.Len(uint(state.maxWorkerNum-1))
 		max = int(gutil.MaxInt32(minW, int32(max)))
 		min := int(gutil.MinInt32(minW, int32(max)))
-		kernel.ErrorLog("manager [%s] max worker num : %d",pid, max)
+		kernel.ErrorLog("manager [%s] max worker num : %d", pid, max)
 		state.worker = ringbuffer.NewSingleRingBuffer(min, max)
 		state.wait = ringbuffer.NewSingleRingBuffer(minW, 2048)
 		return &state
@@ -65,6 +65,7 @@ func (m *managerState) newRequest(req *Request, ctx *kernel.Context) {
 }
 
 func (m *managerState) newWorker(self *kernel.Pid) *kernel.Pid {
-	worker, _ := kernel.Start(workerActor, self,m.engine)
+	worker, _ := kernel.Start(workerActor, self, m.engine)
+	m.workerNum++
 	return worker
 }
