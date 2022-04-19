@@ -4,7 +4,10 @@ package ejson
 	easy json
 */
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"unsafe"
+)
 
 type Json map[string]interface{}
 
@@ -14,6 +17,11 @@ func Decode(buf []byte) Json {
 		return nil
 	}
 	return m
+}
+
+func DecodeString(jsonStr string) Json {
+	buf := *(*[]byte)(unsafe.Pointer(&jsonStr))
+	return Decode(buf)
 }
 
 func (j Json) Int(key string) int {
@@ -58,8 +66,28 @@ func (j Json) Json(key string) Json {
 	return nil
 }
 
+func (j Json) List(key string) []Json {
+	if j == nil {
+		return nil
+	}
+	if v, ok := j[key]; ok {
+		if m, ok := v.([]Json); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+func (j Json) Encode() []byte {
+	bin, _ := json.Marshal(j)
+	return bin
+}
+
 func intValue(value interface{}) int {
-	if v, ok := value.(float64); ok {
+	switch v := value.(type) {
+	case int:
+		return v
+	case float64:
 		return int(v)
 	}
 	return 0

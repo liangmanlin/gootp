@@ -111,6 +111,10 @@ func (r *Request) Lookup(key string) (value string) {
 	return r.Form.Get(key)
 }
 
+func (r *Request) addHeader(key, value string) {
+	r.Header.Set(key, value)
+}
+
 // 返回表单多个values
 func (r *Request) FormValues(key string) (values []string) {
 	if r.Method == "POST" {

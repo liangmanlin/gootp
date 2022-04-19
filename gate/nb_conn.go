@@ -75,7 +75,7 @@ func (c *ConnNbio) Read(buf []byte) (n int, err error) {
 					break
 				}
 				continue
-			}else{
+			} else {
 				break
 			}
 		}
@@ -120,7 +120,7 @@ func (c *ConnNbio) Send(buf []byte) (int, error) {
 	if c.Conn == nil {
 		return 0, ErrSocketClosed
 	}
-	if c.head ==0 {
+	if c.head == 0 {
 		n, err := c.Conn.Write(buf)
 		return n, err
 	}
@@ -207,7 +207,7 @@ func (c *ConnNbio) onRead(conn *nbio.Conn) {
 		if errors.Is(err, syscall.EAGAIN) {
 			break
 		}
-		if err != nil{
+		if err != nil {
 			c.CloseWithError(err)
 		}
 		if n < bSize {

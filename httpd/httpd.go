@@ -31,8 +31,8 @@ func New(name string, port int, c ...config) *Engine {
 		tcpReadBuff:  16 * 1024, // 缺省16k
 		managerNum:   cpuNum,
 		maxWorkerNum: cpuNum * 1024,
-		getRouter:    router{},
-		postRouter:   router{},
+		getRouter:    &router{rt: map[string]*handler{}},
+		postRouter:   &router{rt: map[string]*handler{}},
 	}
 	for _, f := range c {
 		f(d)
@@ -180,107 +180,6 @@ func (e *Engine) buildAddr() []string {
 		}
 	}
 	return rs
-}
-
-func (e *Engine) Get(uri string, handler func(ctx *kernel.Context, request *Request)) {
-	paths := buildPaths(uri)
-	insertPathsGroup(e.getRouter, paths, handler)
-}
-
-func (e *Engine) Post(uri string, handler func(ctx *kernel.Context, request *Request)) {
-	paths := buildPaths(uri)
-	insertPathsGroup(e.postRouter, paths, handler)
-}
-
-func (e *Engine) GetWebsocket(uri string, handler *kernel.Actor, args ...interface{}) {
-	paths := buildPaths(uri)
-	h := insertPathsGroup(e.getRouter, paths, none)
-	h.isWs = true
-	h.actor = handler
-	h.actorArgs = args
-	e.hasWebSocket = true
-}
-
-// 返回一个url组
-// 用法
-// e := New("web",8080)
-// g := e.Group("/v1") // 组为根目录 host/v1
-// {
-//		g.Get("/login",handler)  // 响应url： host/v1/login
-// }
-func (e *Engine) GetGroup(uriGroup string) *GetGroup {
-	r := insertPathsGroup(e.getRouter, buildPaths(uriGroup), nil)
-	return &GetGroup{h: r, eg: e}
-}
-
-func (e *Engine) PostGroup(uriGroup string) *PostGroup {
-	r := insertPathsGroup(e.postRouter, buildPaths(uriGroup), nil)
-	return &PostGroup{h: r, eg: e}
-}
-
-type Group struct {
-	h  *handler
-	eg *Engine
-}
-
-type GetGroup Group
-type PostGroup Group
-
-// GET
-func (g *GetGroup) Get(uri string, handler handlerFunc) {
-	paths := buildPaths(uri)[1:]
-	if g.h.r == nil {
-		g.h.r = router{}
-	}
-	insertPathsGroup(g.h.r, paths, handler)
-}
-
-func (g *GetGroup) GetWebsocket(uri string, handler *kernel.Actor) {
-	paths := buildPaths(uri)[1:]
-	if g.h.r == nil {
-		g.h.r = router{}
-	}
-	h := insertPathsGroup(g.h.r, paths, none)
-	h.isWs = true
-	h.actor = handler
-	g.eg.hasWebSocket = true
-}
-
-func (g *GetGroup) Group(uriGroup string) *GetGroup {
-	paths := buildPaths(uriGroup)[1:]
-	if g.h.r == nil {
-		g.h.r = router{}
-	}
-	r := insertPathsGroup(g.h.r, paths, nil)
-	return &GetGroup{h: r, eg: g.eg}
-}
-
-// 设置拦截器
-func (g *GetGroup) SetInterceptor(f func(r *Request) bool) {
-	g.h.interceptor = f
-}
-
-// POST
-func (g *PostGroup) Post(uri string, handler handlerFunc) {
-	paths := buildPaths(uri)[1:]
-	if g.h.r == nil {
-		g.h.r = router{}
-	}
-	insertPathsGroup(g.h.r, paths, handler)
-}
-
-func (g *PostGroup) Group(uriGroup string) *PostGroup {
-	paths := buildPaths(uriGroup)[1:]
-	if g.h.r == nil {
-		g.h.r = router{}
-	}
-	r := insertPathsGroup(g.h.r, paths, nil)
-	return &PostGroup{h: r, eg: g.eg}
-}
-
-// 设置拦截器
-func (g *PostGroup) SetInterceptor(f func(r *Request) bool) {
-	g.h.interceptor = f
 }
 
 // 单纯是代码好看一点

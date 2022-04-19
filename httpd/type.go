@@ -20,8 +20,8 @@ type Engine struct {
 	balancing    int
 	engine       *nbio.Gopher
 	addr         []string
-	getRouter    router
-	postRouter   router
+	getRouter    *router
+	postRouter   *router
 	hasWebSocket bool
 	wsConfig     *websocket.Config
 }
@@ -37,7 +37,12 @@ type Request struct {
 	isReply      bool
 }
 
-type router map[string]*handler
+type router struct {
+	rType byte
+	rName string
+	h     *handler
+	rt    map[string]*handler
+}
 
 type handler struct {
 	isWs        bool
@@ -45,7 +50,7 @@ type handler struct {
 	actorArgs   []interface{}
 	interceptor func(request *Request) bool // 拦截器
 	f           handlerFunc
-	r           router
+	r           *router
 }
 
 type handlerFunc func(ctx *kernel.Context, request *Request)
