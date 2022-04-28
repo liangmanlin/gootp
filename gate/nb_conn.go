@@ -7,15 +7,10 @@ import (
 	"github.com/liangmanlin/gootp/kernel"
 	"io"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
-)
-
-type nbMode int32
-
-const (
-	nb_mode_passive nbMode = iota + 1 // 被动
-	nb_mode_active                    // 主动
+	"unsafe"
 )
 
 var (
@@ -27,7 +22,6 @@ type ConnNbio struct {
 	*nbio.Conn
 	recvPid *kernel.Pid
 
-	mod       nbMode
 	recvState bool
 	recvChan  chan kernel.Empty
 
@@ -37,17 +31,20 @@ type ConnNbio struct {
 }
 
 func NewNbConn(conn *nbio.Conn) Conn {
-	return &ConnNbio{Conn: conn, mod: nb_mode_passive, recvChan: make(chan kernel.Empty, 1)}
+	return &ConnNbio{Conn: conn, recvChan: make(chan kernel.Empty, 1)}
+}
+
+func (c *ConnNbio) getHandler() *kernel.Pid {
+	return (*kernel.Pid)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.recvPid))))
 }
 
 // 仅仅被动模式可用
 func (c *ConnNbio) Read(buf []byte) (n int, err error) {
-	c.mux.Lock()
-	if c.mod != nb_mode_passive {
-		c.mux.Unlock()
+	if c.getHandler() != nil {
 		err = ErrSocketActiveMode
 		return
 	}
+	c.mux.Lock()
 	size := len(buf)
 	var rn int
 	for n < size {
@@ -85,13 +82,10 @@ func (c *ConnNbio) Read(buf []byte) (n int, err error) {
 }
 
 func (c *ConnNbio) Recv(len int, timeOutMS int) ([]byte, error) {
-	c.mux.Lock()
 	var err error
-	if c.mod != nb_mode_passive {
-		c.mux.Unlock()
+	if c.getHandler() != nil {
 		return nil, ErrSocketActiveMode
 	}
-	c.mux.Unlock()
 
 	if timeOutMS > 0 {
 		err = c.SetReadDeadline(time.Now().Add(time.Duration(timeOutMS) * time.Millisecond))
@@ -165,31 +159,30 @@ func (c *ConnNbio) StartReader(dest *kernel.Pid) {
 	}
 	c.mux.Lock()
 	defer c.mux.Unlock()
-	c.mod = nb_mode_active
 	c.recvState = false
 	close(c.recvChan)
 	c.recvChan = nil
-	c.recvPid = dest
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.recvPid)), unsafe.Pointer(dest))
 	// 考虑到可能缓冲区还有数据，这里尝试读取一次数据
-	c.onRead(c.Conn)
+	c.onRead(c.Conn, dest)
 }
 
 // epoll 触发
 func (c *ConnNbio) OnRead(conn *nbio.Conn) {
-	c.mux.Lock()
-	if c.mod == nb_mode_passive {
+	recvPid := c.getHandler()
+	if recvPid == nil {
+		c.mux.Lock()
 		if c.recvState {
 			c.recvState = false
 			c.recvChan <- kernel.Empty{}
 		}
 		c.mux.Unlock()
 	} else {
-		c.mux.Unlock()
-		c.onRead(conn)
+		c.onRead(conn, recvPid)
 	}
 }
 
-func (c *ConnNbio) onRead(conn *nbio.Conn) {
+func (c *ConnNbio) onRead(conn *nbio.Conn, recvPid *kernel.Pid) {
 	if c.buffer == nil {
 		c.buffer = bpool.New(4 * 1024)
 	}
@@ -199,7 +192,7 @@ func (c *ConnNbio) onRead(conn *nbio.Conn) {
 		n, err := conn.Read(buf[c.buffer.Size():])
 		if n > 0 {
 			c.buffer.SetSize(c.buffer.Size() + n)
-			buf = c.readBuf(buf)
+			buf = c.readBuf(buf, recvPid)
 		}
 		if errors.Is(err, syscall.EINTR) {
 			continue
@@ -216,7 +209,7 @@ func (c *ConnNbio) onRead(conn *nbio.Conn) {
 	}
 }
 
-func (c *ConnNbio) readBuf(buf []byte) []byte {
+func (c *ConnNbio) readBuf(buf []byte, recvPid *kernel.Pid) []byte {
 	for {
 		if c.totalSize == 0 && c.buffer.Size() >= c.head {
 			c.totalSize = ReadHead(c.head, buf) + c.head
@@ -228,7 +221,7 @@ func (c *ConnNbio) readBuf(buf []byte) []byte {
 		size := c.buffer.Size()
 		if c.totalSize > 0 && size >= c.totalSize {
 			if c.totalSize == size {
-				c.recvPid.Cast(c.buffer)
+				recvPid.Cast(c.buffer)
 				c.buffer = bpool.New(4 * 1024)
 				buf = c.buffer.ToBytes()[:c.buffer.Cap()]
 				c.totalSize = 0
@@ -239,7 +232,7 @@ func (c *ConnNbio) readBuf(buf []byte) []byte {
 				buf = c.buffer.ToBytes()[:c.buffer.Cap()]
 				tmp.SetSize(c.totalSize)
 				c.totalSize = 0
-				c.recvPid.Cast(tmp)
+				recvPid.Cast(tmp)
 			}
 		} else {
 			break
