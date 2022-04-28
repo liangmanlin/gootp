@@ -1,9 +1,11 @@
 package kernel
 
 import (
+	"github.com/liangmanlin/routine"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 type initResult struct {
@@ -33,6 +35,22 @@ type CallInfo struct {
 type CallResult struct {
 	ID     int64
 	Result interface{}
+}
+
+func Self() *Pid {
+	ctx := routine.Get[Context]()
+	if ctx != nil {
+		return ctx.self
+	}
+	return nil
+}
+
+func Ctx() *Context {
+	ctx := routine.Get[Context]()
+	if ctx != nil {
+		return ctx
+	}
+	return nil
 }
 
 func ActorOpt(opt ...interface{}) []interface{} {
@@ -68,7 +86,7 @@ func CastNameNode(name string, node interface{}, msg interface{}) {
 		CastName(name, msg)
 		return
 	}
-	defer func() {recover()}()
+	defer func() { recover() }()
 	if p, ok := GetNodeNetWork(dn); ok {
 		m := &NodeMsgName{Dest: name, Msg: msg}
 		p.c <- m
@@ -83,7 +101,7 @@ func CastName(name string, msg interface{}) {
 
 func Cast(pid *Pid, msg interface{}) {
 	// 浪费一点性能，使得发送不会因为对端退出而阻塞，或者panic
-	defer func() {recover()}()
+	defer func() { recover() }()
 	if pid.node != nil {
 		if p, ok := GetNodeNetWork(pid.node); ok {
 			m := &NodeMsg{Dest: pid, Msg: msg}
@@ -107,18 +125,26 @@ func CallName(name string, request interface{}) (bool, interface{}) {
 
 func CallNameNode(name string, node interface{}, request interface{}) (bool, interface{}) {
 	c := make(chan interface{})
-	return callNameNode(name,node,request,c,true,recResult)
+	f := recResult
+	if ctx := Ctx(); ctx != nil {
+		f = ctx.recResult
+	}
+	return callNameNode(name, node, request, c, true, f)
 }
 
 func CallTimeOut(pid *Pid, request interface{}, timeOut time.Duration) (bool, interface{}) {
 	c := make(chan interface{})
-	return callTimeOut(pid, request, timeOut, c,true, recResult)
+	f := recResult
+	if ctx := Ctx(); ctx != nil {
+		f = ctx.recResult
+	}
+	return callTimeOut(pid, request, timeOut, c, true, f)
 }
 
-func callTimeOut(pid *Pid, request interface{}, timeOut time.Duration, rc chan interface{},closeRC bool,
+func callTimeOut(pid *Pid, request interface{}, timeOut time.Duration, rc chan interface{}, closeRC bool,
 	recvFun func(int64, chan interface{}, time.Duration) (bool, interface{})) (bool, interface{}) {
 	// 浪费一点性能，使得发送不会因为对端退出而阻塞，或者panic
-	defer func() {recover()}()
+	defer func() { recover() }()
 	if closeRC {
 		defer close(rc)
 	}
@@ -140,7 +166,7 @@ func callTimeOut(pid *Pid, request interface{}, timeOut time.Duration, rc chan i
 	}
 }
 
-func callNameNode(name string, node interface{}, request interface{},rc chan interface{},closeRC bool,
+func callNameNode(name string, node interface{}, request interface{}, rc chan interface{}, closeRC bool,
 	recvFun func(int64, chan interface{}, time.Duration) (bool, interface{})) (bool, interface{}) {
 	var dn *Node
 	switch n := node.(type) {
@@ -154,11 +180,11 @@ func callNameNode(name string, node interface{}, request interface{},rc chan int
 	}
 	if dn.Equal(SelfNode()) {
 		if pid := WhereIs(name); pid != nil {
-			return callTimeOut(pid, request, 5,rc,closeRC,recvFun)
+			return callTimeOut(pid, request, 5, rc, closeRC, recvFun)
 		}
 		return false, &CallError{ErrType: CallErrorTypeNoProc}
 	}
-	defer func() {recover()}()
+	defer func() { recover() }()
 	if closeRC {
 		defer close(rc)
 	}
@@ -186,7 +212,7 @@ func StartOpt(actor *Actor, opt []interface{}, args ...interface{}) (*Pid, inter
 }
 
 func startGO(pid *Pid, actor *Actor, opt []interface{}, args ...interface{}) (ok bool, err interface{}) {
-	context := &Context{self: pid, actor: actor,callMode: call_mode_normal}
+	context := &Context{self: pid, actor: actor, callMode: call_mode_normal}
 	defer func() {
 		if !ok {
 			err = recover()
@@ -219,6 +245,7 @@ func getCacheSize(opt []interface{}) int {
 }
 
 func loop(pid *Pid, context *Context) {
+	routine.Set(unsafe.Pointer(context))
 	var iStop *initStop = nil
 	defer exitFinal(context, &iStop)
 	for {
@@ -335,7 +362,7 @@ func makeCallID() int64 {
 }
 
 func Reply(recCh chan interface{}, callID int64, result interface{}) {
-	defer func() {recover()}() // 理论上可以预见问题
+	defer func() { recover() }() // 理论上可以预见问题
 	r := &CallResult{callID, result}
 	recCh <- r
 }

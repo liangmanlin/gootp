@@ -3,7 +3,6 @@ package kernel
 import (
 	"testing"
 	"time"
-	"unsafe"
 )
 
 func TestKernelStart(t *testing.T) {
@@ -16,13 +15,13 @@ func TestKernelStart(t *testing.T) {
 	KernelStart(func() {
 		for i := 0; i < 10; i++ {
 			A := DefaultActor()
-			A.Init = func(context *Context,pid *Pid, args ...interface{}) unsafe.Pointer {
+			A.Init = func(context *Context, pid *Pid, args ...interface{}) interface{} {
 				SendAfter(TimerTypeForever, pid, 100, 1)
-				ErrorLog("Start :%s",pid)
+				ErrorLog("Start :%s", pid)
 				return nil
 			}
 			A.Terminate = func(context *Context, reason *Terminate) {
-				ErrorLog("stop :%s", context.self)
+				ErrorLog("stop :%s", Ctx().Self())
 			}
 			Start(A)
 		}
