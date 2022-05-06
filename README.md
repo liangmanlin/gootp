@@ -14,4 +14,4 @@
 
 ### 更多的功能更新请自行查阅
 
-## 传送门 [WIKI](https://github.com/liangmanlin/gootp/-/wikis/home)
+## 传送门 [WIKI](https://github.com/liangmanlin/gootp/wikis/home)
